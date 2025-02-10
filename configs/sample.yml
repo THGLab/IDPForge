@@ -45,5 +45,5 @@ relax:
   max_iterations: 0
   tolerance: 2.39
   stiffness: 10.0
-  max_outer_iterations: 20
+  max_outer_iterations: 10
   exclude_residues: []

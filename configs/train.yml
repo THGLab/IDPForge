@@ -3,7 +3,7 @@ general:
   output: local
   run_name: test
   save_pdb: true
-  batch_save_freq: 10
+  batch_save_freq: 2
   epoch_save_freq: 5
 data:
   path: data/
@@ -34,7 +34,7 @@ training:
   loss:
     weights:
       fape: 1
-      dist: 0
+      dist: 0.01
       angular: 0.1
       violation: 0
     fape:
@@ -48,12 +48,6 @@ training:
 diffuse:
   n_tsteps: 200
   n_tsteps_inf: 40
-relax:
-  max_iterations: 0
-  tolerance: 2.39
-  stiffness: 10.0
-  max_outer_iterations: 20
-  exclude_residues: []
 model:
   t_embed_dim: 32
   t2d_params:

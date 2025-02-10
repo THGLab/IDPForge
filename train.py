@@ -1,5 +1,5 @@
 """
-script to run training of the idpVAE
+script to run training of IDPForge
 """
 
 import os

@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from openfold.np.residue_constants import ca_ca, restype_order
+from openfold.np.residue_constants import restype_order
 from openfold.utils.rigid_utils import Rigid, Rotation, identity_rot_mats
 from openfold.utils.loss import (
     backbone_loss,
@@ -158,20 +158,6 @@ def torsion_loss(pred_coords, pred_norm_torsions, pred_torsions, true_torsions, 
         
 
 def viol_loss(batch, return_metric=False):
-    # reinforce peptide connection
-    """
-    ca = batch["positions"][-1][..., 1, :] 
-    ca_dist = torch.sqrt(
-        1e-6
-        + torch.sum(
-            (ca[..., :-1, :] - ca[..., 1:, :])** 2,
-            dim=-1,
-        )
-    )
-    ca_mask = batch["atom14_atom_exists"][..., 1][..., 1:]
-    ca_dist = ca_dist * ca_mask
-    ca_loss = ((ca_dist - ca_ca)**2).sum() / ca_mask.sum()
-    """
     
     violations = find_structural_violations(batch, batch["positions"][-1].detach(), 5, 5)
     bond_clash_loss = violation_loss(violations, batch["atom14_atom_exists"]).mean()

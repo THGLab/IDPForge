@@ -57,11 +57,6 @@ class IDPForgeWrapper(pl.LightningModule):
         if self.ema.device != batch["ss"].device:
             self.ema.to(batch["ss"].device)
 
-        esm_embeds = None 
-        if self.config["model"]["use_esm"] or self.config["model"]["use_esm_attn_map"]:
-            with torch.no_grad():
-                esm_embeds = self.esm_embedder(batch["sequence"], batch["mask"])
-        
         in_batch = {k: batch[k] for k in ["sequence", "ss", "mask", "resi"]}
         if torch.rand(1).item() < 0.25:
             in_batch["ss"] = torch.zeros_like(batch["ss"]) + 7
@@ -70,10 +65,10 @@ class IDPForgeWrapper(pl.LightningModule):
         if self.config['model']['self_condition'] and torch.rand(1).item() < 0.5 and not torch.any(batch["T"] + 1 >= self.denoiser.diffuser.T):
             with torch.no_grad():
                 prev = self.model((batch["T"] + 1).to(torch.long),  
-                    batch["alpha_t+1"], batch["x_t+1"], in_batch, prev, esm_embeds) 
+                    batch["alpha_t+1"], batch["x_t+1"], in_batch, prev) 
 
         output = self.model(batch["T"].to(torch.long), 
-                batch["alpha_t"], batch["x_t"], in_batch, prev, esm_embeds)  
+                batch["alpha_t"], batch["x_t"], in_batch, prev)  
         output["sstype"] = batch["ss"]
         loss, loss_breakdown = self.loss_fn(output,
                 batch["frame"], batch["coord"], batch["torsion"],
@@ -89,28 +84,19 @@ class IDPForgeWrapper(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         # At the start of validation, load the EMA weights
         if self.cached_weights is None:
-            # model.state_dict() contains references to model weights rather
-            # than copies. Therefore, we need to clone them before calling 
-            # load_state_dict().
             clone_param = lambda t: t.detach().clone()
             self.cached_weights = tensor_tree_map(clone_param, self.model.state_dict())
             self.model.load_state_dict(self.ema.state_dict()["params"])
         
-        esm_embeds = None
-        if self.config["model"]["use_esm"] or self.config["model"]["use_esm_attn_map"]:
-            esm_embeds = self.esm_embedder(batch["sequence"], batch["mask"])
-
         in_batch = {k: batch[k] for k in ["sequence", "ss", "mask", "resi"]}
         if torch.rand(1).item() < 0.25:
             in_batch["ss"] = torch.zeros_like(batch["ss"]) + 7
-        output = self.model.recon(self.denoiser, 
-                batch["alpha_t"], batch["x_t"], in_batch, esm_embeds) 
+        output = self.model.recon(self.denoiser, batch["alpha_t"], batch["x_t"], in_batch) 
         output["sstype"] = batch["ss"]
 
         loss_breakdown = {}
         loss_breakdown["ca_drmsd"] = drmsd(output["positions"][-1][:, :, 1].detach(), 
             batch["coord"][:, :, 1], batch["mask"]).mean().item()
-    
         v_l, v_mask = viol_loss(output, return_metric=True)
         loss_breakdown["violation"] = v_l.item()
         

@@ -6,18 +6,21 @@ A transformer protein language diffusion model to create all-atom IDP ensembles 
 
 The environment can be built via `conda env create -f env.yml`. This repo also requires `openfold` utilities, please refer to https://openfold.readthedocs.io/en/latest/Installation.html for installation instructions.
 
-ESM2 utilities are refactored into this repo for exploring the effects of ESM embedding on IDP modeling. Alternatively, it can be installed from their github https://github.com/facebookresearch/esm.git, or via pip install `pip install fair-esm`.
+ESM2 utilities are refactored into this repo for network modules and exploring the effects of ESM embedding on IDP modeling. Alternatively, it can be installed from their github https://github.com/facebookresearch/esm.git, or via pip install `pip install fair-esm`.
+
+Models weights and example training data and inference input files can be downloaded from https://, and move them to the corresponding folder.
 
 ## Training
 
 We use `pytorch-lightning` for training and one can customize training via the documented flags under `trainer` in the config file.
 ```bash
+conda activate idpforge
 python train.py --model_config_path configs/train.yml
 ```
 
 ## Sampling
 
-### single chain IDP/IDRs
+### Single chain IDP/IDRs
 
 We provide a commandline interface to sample single chain IDP/IDRs.
 ```
@@ -38,7 +41,7 @@ optional arguments:
 Example to generate 100 conformers for Sic1:
 
 ```bash
-python sample_idp.py weights/mdl.ckpt local configs/sample.yml --nconf 100 --cuda 
+python sample_idp.py weights/mdl.ckpt test configs/sample.yml --nconf 100 --cuda 
 ```
 
 Inference time experimental guidance can be activated by the potential flag in the `configs/sample.yml`. An example PREs experimental data file is also provided in `data/sic1_pre_exp.txt`.
@@ -53,7 +56,7 @@ The current script assumes the disordered region coordinates are present in the 
 
 Then, to generate an IDRs with folded domains ensemble, run
 ```bash
-python sample_ldr.py weights/mdl.ckpt data/AF-P63027_ldr.npz local configs/sample.yml --nconf 100 --cuda
+python sample_ldr.py weights/mdl.ckpt data/AF-P63027_ldr.npz test configs/sample.yml --nconf 100 --cuda
 ```
 One can set the `attention_chunk` to manage memory usage for long sequences.
 

@@ -62,18 +62,16 @@ def main(ckpt_path, output_dir, sample_cfg,
         os.mkdir(output_dir)
     
     start = 0
-    while len(glob(output_dir+"/*_relaxed.pdb")) < nsample:
-        end = min(start + batch_size, nsample) 
-        chunk = range(start, end)
-        seq_list = [settings["sequence"]] * len(chunk) 
-        ss_list = random.sample(ss, len(chunk))
+    while start < nsample:
+        chunk = min(batch_size, nsample - start) 
+        seq_list = [settings["sequence"]] * chunk
+        ss_list = random.sample(ss, chunk)
         xt_list, tor_list = denoiser.init_samples(seq_list)
         outputs = model.sample(denoiser, seq_list, ss_list, tor_list, xt_list, 
                 potential_cfgs=potential_cfg)
         output_to_pdb(outputs, relax=mlc.ConfigDict(settings["relax"]), 
-                save_path=output_dir, counter=len(glob(output_dir+"/*_relaxed.pdb"))+1,
-                counter_cap=nsample)
-        start += batch_size
+                save_path=output_dir, counter=start+1, counter_cap=nsample)
+        start = len(glob(output_dir+"/*_relaxed.pdb")) 
 
         
     print("done")

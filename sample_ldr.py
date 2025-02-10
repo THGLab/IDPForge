@@ -58,25 +58,23 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
     viol = 0.025 if attn_chunk_size < len(sequence) else 0.025*sum(fold_data["mask"])/len(sequence)
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
-
+    
     start = 0
-    while len(glob(output_dir+"/*_relaxed.pdb")) < nsample: 
-        end = min(start + batch_size, nsample) 
-        chunk = range(start, end)
-        seq_list = [sequence] * len(chunk) 
-        ss_list = random.sample(ss, len(chunk))
+    while start < nsample: 
+        chunk = min(batch_size, nsample - start)
+        seq_list = [sequence] * chunk 
+        ss_list = random.sample(ss, chunk)
         xt_list, tor_list = denoiser.init_samples(seq_list, crd_offset)
-        template = {k: torch.tensor(np.tile(v[None, ...], (len(chunk),) + (1,) * len(v.shape)), 
+        template = {k: torch.tensor(np.tile(v[None, ...], (chunk,) + (1,) * len(v.shape)), 
             device=model.device, dtype=torch.long if k=="mask" else torch.float) 
             for k, v in fold_data.items() if k in ["coord", "torsion", "mask"]}
 
         outputs = model.sample(denoiser, seq_list, ss_list, tor_list, xt_list, 
                 template_cfgs=template)
         output_to_pdb(outputs, relax=mlc.ConfigDict(relax_config), 
-                save_path=output_dir, 
-                counter=len(glob(output_dir+"/*_relaxed.pdb"))+1,
+                save_path=output_dir, counter=start+1,
                 counter_cap=nsample, drop_viol=viol)
-        start += batch_size
+        start = len(glob(output_dir+"/*_relaxed.pdb"))
         
     print("done")
 

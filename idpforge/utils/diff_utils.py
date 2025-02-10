@@ -13,10 +13,6 @@ from idpforge.utils.definitions import backbone_atom_positions
 def wrap_rad(x):
     return np.mod(x + np.pi, 2 * np.pi) - np.pi
 
-def set_random_seed(s):
-    torch.manual_seed(s)
-    np.random.seed(s)
-
 
 def align_coords(crd1, crd2, atom_mask):
     """
