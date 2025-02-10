@@ -32,6 +32,7 @@ slurm_logs/
 slurm*.out
 *.ipynb
 data/example_*
+data/diff_igso3.pkl
 
 # Junk #
 ########
