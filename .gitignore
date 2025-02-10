@@ -23,6 +23,7 @@ __pycache__/
 .vscode/
 esm/dev
 local/
+weights/
 
 # Cluster Ouputs #
 submit*.slurm
@@ -30,6 +31,7 @@ submit*.sh
 slurm_logs/
 slurm*.out
 *.ipynb
+data/example_*
 
 # Junk #
 ########
