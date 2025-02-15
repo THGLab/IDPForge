@@ -64,10 +64,10 @@ def calc_loss(pred, true_rigids, true_coords, true_torsions,
                 atom_mask=pred["atom14_atom_exists"], 
                 sidechain_mask=torsion_mask, 
                 fape_clamp=None).mean()
-        loss_dict["fape"] = fapeloss + sidechain_fapeloss
+        loss_dict["fape"] = (fapeloss + sidechain_fapeloss) ** 2
     
     if loss_cfg["weights"]["dist"] > 0:
-        dloss = Cb_dist_loss(pred, true_coords,
+        dloss = cb_dist_loss(pred, true_coords,
                     loss_cfg["dist"]["loop_clamp"], 
                     loss_cfg["dist"]["eps"])
         if loss_cfg["dist"]["sidechain"] > 0:
@@ -119,7 +119,7 @@ def mse_frame_loss(
 
 
 
-def Cb_dist_loss(pred, true_coords, loop_clamp, eps):
+def cb_dist_loss(pred, true_coords, loop_clamp, eps, l_coef=1.):
     beta = pseudo_beta_fn(pred["aatype"], pred["positions"][-1], None)
     true_beta = alt_beta_fn(pred["aatype"], true_coords)
     pred_d = torch.sum(
@@ -130,12 +130,14 @@ def Cb_dist_loss(pred, true_coords, loop_clamp, eps):
         dim=-1) + eps
     
     square_mask = pred["atom14_atom_exists"][..., 0][..., None] * pred["atom14_atom_exists"][..., 0][..., None, :]
+    ca_loss = ca_connectivity_loss(pred["positions"][-1][..., 1, :], 
+            pred["atom14_atom_exists"][..., 1]) # reinforce peptide connection
     error = torch.clamp(torch.sqrt(true_d) - torch.sqrt(pred_d), min=0, max=loop_clamp)
     sec_mask = (pred["sstype"] < 2).float()
     sec_mask = sec_mask[..., None] * sec_mask[..., None, :] * square_mask
     sec_error = torch.clamp(torch.sqrt(pred_d) - torch.sqrt(true_d), min=0, max=loop_clamp)
-    return (square_mask * error**2).sum() / square_mask.sum() + (sec_mask * sec_error**2).sum() / sec_mask.sum()
-
+    return ((square_mask * error**2).sum() / square_mask.sum() + ca_loss) * l_coef + \
+            (sec_mask * sec_error**2).sum() / sec_mask.sum() 
 
 def dist_loss(pred_coords, true_coords, pos_mask, clamp, eps):
     pred_d = torch.sum(
@@ -156,9 +158,17 @@ def torsion_loss(pred_coords, pred_norm_torsions, pred_torsions, true_torsions, 
  
     return (l_torsion * mask).sum() / mask.sum() + 0.02 * l_angle_norm
         
+def ca_connectivity_loss(coords, ca_mask):
+    # reinforce peptide connection
+    ca_dist = torch.sqrt(
+        1e-6 + torch.sum(
+            (coords[..., :-1, :] - coords[..., 1:, :])** 2,
+        dim=-1)
+    )
+    ca_dist = ca_dist * ca_mask[..., 1:]
+    return ((ca_dist - ca_ca)**2).sum() / ca_mask.sum()
 
 def viol_loss(batch, return_metric=False):
-    
     violations = find_structural_violations(batch, batch["positions"][-1].detach(), 5, 5)
     bond_clash_loss = violation_loss(violations, batch["atom14_atom_exists"]).mean()
     if return_metric:

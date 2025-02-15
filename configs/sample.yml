@@ -40,7 +40,7 @@ sec_path: data/example_sec.txt
 diffuse:
   n_tsteps: 200
   inference_steps: 40
-  end: 149
+  end: 49
 relax:
   max_iterations: 0
   tolerance: 2.39

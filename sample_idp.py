@@ -2,6 +2,7 @@ import os
 import yaml
 import torch
 import random
+
 from glob import glob
 import ml_collections as mlc
 from pytorch_lightning import Trainer, seed_everything
@@ -69,6 +70,7 @@ def main(ckpt_path, output_dir, sample_cfg,
         xt_list, tor_list = denoiser.init_samples(seq_list)
         outputs = model.sample(denoiser, seq_list, ss_list, tor_list, xt_list, 
                 potential_cfgs=potential_cfg)
+        
         output_to_pdb(outputs, relax=mlc.ConfigDict(settings["relax"]), 
                 save_path=output_dir, counter=start+1, counter_cap=nsample)
         start = len(glob(output_dir+"/*_relaxed.pdb")) 

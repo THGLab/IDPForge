@@ -16,8 +16,8 @@ def sample_fix_distance(batch_size, fixed_distance):
     vectors = np.stack([x, y, z], axis=1)
     return vectors
 
-def est_rg(n, clamp=10):
-    return min(2*n**0.588, clamp)
+def est_rg(n, min_clip=10):
+    return max(2*n**0.588, min_clip)
 
 
 def main(pdb, disorder_idx, nsample, ldr_coeff=1.5):

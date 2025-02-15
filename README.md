@@ -8,7 +8,7 @@ The environment can be built via `conda env create -f env.yml`. This repo also r
 
 ESM2 utilities are refactored into this repo for network modules and exploring the effects of ESM embedding on IDP modeling. Alternatively, it can be installed from their github https://github.com/facebookresearch/esm.git, or via pip install `pip install fair-esm`.
 
-Models weights and example training data and inference input files can be downloaded from https://, and move them to the corresponding folder.
+Models weights and example training data and inference input files can be downloaded from DOI: 10.6084/m9.figshare.28414937. Unzip and move them to the corresponding folder before running scripts.
 
 ## Training
 
@@ -41,6 +41,7 @@ optional arguments:
 Example to generate 100 conformers for Sic1:
 
 ```bash
+mkdir test
 python sample_idp.py weights/mdl.ckpt test configs/sample.yml --nconf 100 --cuda 
 ```
 
@@ -50,7 +51,7 @@ Inference time experimental guidance can be activated by the potential flag in t
 
 First, to prepare the folded template, run `python init_ldr_template.py`. We provide an example for sampling the low confidence region of AF entry P63027:
 ```bash
-python data/init_ldr_template.py data/AF-P63027-F1-model_v4.pdb 1-43 data/AF-P63027_ldr.npz
+python mk_ldr_template.py data/AF-P63027-F1-model_v4.pdb 1-43 data/AF-P63027_ldr.npz
 ```
 The current script assumes the disordered region coordinates are present in the input pdb, and the provided model weights are not recommended for predicting multiple domains.
 
@@ -62,4 +63,5 @@ One can set the `attention_chunk` to manage memory usage for long sequences.
 
 ## Citation
 ```bibtex
+
 ```
