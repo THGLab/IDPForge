@@ -4,7 +4,7 @@ Relavent data files can be downloaded from DOI: 10.6084/m9.figshare.28414937.
 
 `train_idr_seqs.fasta`: IDP/IDRs training sequences from DisProt and IDRome (https://github.com/KULL-Centre/_2023_Tesei_IDRome.git).
 
-`example_sec.txt`: compiled secondary structure encoding examples; can be customized based on sampling needs. 
+`idpcg_disprot`: IDPConformerGenerator (https://github.com/julie-forman-kay-lab/IDPConformerGenerator.git) generated DisProt conformers.
 
 `example_data.pkl`: an example training data pickle. It contains secondary structure encodings, amino sequences and heavy atom coordinates. An input pdb can be prepared by
 
@@ -29,6 +29,8 @@ def parse_pdb(pdb):
 
 sec, seq, crd = parse_pdb("input.pdb")
 ```
+`example_sec.txt`: compiled secondary structure encoding examples; can be customized based on sampling needs.
+
 `diff_igso3.pkl`: cached IGSO3 discretization for 200 timesteps on a linear schedule; will generate based on diffusion schedule parameters if not provided.
 
 `AF-P63027_ndr.npz`: an example N-IDR template file, processed using `mk_ldr_template.py`.
