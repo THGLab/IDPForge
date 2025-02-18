@@ -1,5 +1,8 @@
-# Modified from Meta ESM2
-#
+"""
+Modified from ESM2
+Copyright (c) Meta Platforms, Inc. and affiliates.
+"""
+
 import typing as T
 from dataclasses import dataclass
 from functools import partial

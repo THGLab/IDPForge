@@ -1,3 +1,7 @@
+# Adapted from https://github.com/aqlaboratory/openfold/blob/main/openfold/utils/script_utils.py
+# Copyright 2021 AlQuraishi Laboratory
+# Copyright 2021 DeepMind Technologies Limited
+
 import logging
 import os
 import time

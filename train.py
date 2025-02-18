@@ -1,5 +1,6 @@
 """
-script to run training of IDPForge
+Script to run training of IDPForge
+created by OZ, 11/12/24
 """
 
 import os

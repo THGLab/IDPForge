@@ -219,7 +219,7 @@ def xyz_to_t2d(xyz_t, params, aatype, **kwargs):
     t2d[torch.isnan(t2d)] = 0.0
     return t2d
 
-    
+# credit https://github.com/aqlaboratory/openfold/blob/main/openfold/utils/feats.py    
 def torsion_angles_to_frames(
     r: torch.Tensor,
     alpha: torch.Tensor,

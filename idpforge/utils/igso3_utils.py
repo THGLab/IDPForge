@@ -1,4 +1,15 @@
-"""SO(3) diffusion methods."""
+"""
+From https://github.com/RosettaCommons/RFdiffusion.git
+
+Copyright (c) 2023 University of Washington. Developed at the Institute for
+Protein Design by Joseph Watson, David Juergens, Nathaniel Bennett, Brian Trippe
+and Jason Yim. This copyright and license covers both the source code and model
+weights referenced for download in the README file.
+
+SO(3) diffusion methods.
+"""
+
+
 import numpy as np
 import torch
 from scipy.spatial.transform import Rotation

@@ -1,9 +1,16 @@
+"""
+Adapted from https://github.com/RosettaCommons/RFdiffusion.git
+
+Copyright (c) 2023 University of Washington. Developed at the Institute for
+Protein Design by Joseph Watson, David Juergens, Nathaniel Bennett, Brian Trippe
+and Jason Yim. This copyright and license covers both the source code and model
+weights referenced for download in the README file.
+"""
+
 import torch
 import math
 from idpforge.utils.tensor_utils import get_dih
 
-#copyright
-#adapted from https://github.com/RosettaCommons/RFdiffusion.git
 
 class Potential:
     '''

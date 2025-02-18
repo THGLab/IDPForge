@@ -8,7 +8,7 @@ The environment can be built via `conda env create -f env.yml`. This repo also r
 
 ESM2 utilities are refactored into this repo for network modules and exploring the effects of ESM embedding on IDP modeling. Alternatively, it can be installed from their github https://github.com/facebookresearch/esm.git, or via pip install `pip install fair-esm`.
 
-Models weights and an example training data and inference input files can be downloaded from DOI: 10.6084/m9.figshare.28414937. Unzip and move them to the corresponding folder before running scripts.
+Models weights and an example training data and other inference input files can be downloaded from [Figshare](DOI: 10.6084/m9.figshare.28414937). Unzip and move them to the corresponding folder before running scripts.
 
 ## Training
 
@@ -63,5 +63,12 @@ One can set the `attention_chunk` to manage memory usage for long sequences.
 
 ## Citation
 ```bibtex
-
+@article{zhang2025,
+  author    = {Zhang, Oufan and Liu, Zi-Hao and Forman-Kay, Julie D. Head-Gordon, Teresa},
+  title     = {Deep Learning of Proteins with Local and Global Regions of Disorder},
+  journal   = {arXiv preprint},
+  year      = {2025},
+  archivePrefix = {arXiv},
+  eprint    = {2502.11326},
+}
 ```

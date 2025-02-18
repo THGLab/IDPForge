@@ -1,3 +1,6 @@
+# Auxilary file for preparing the LDR inputs
+# created by OZ, 1/8/25
+
 import numpy as np
 import mdtraj as md
 from idpforge.utils.np_utils import (

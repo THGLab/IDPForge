@@ -1,3 +1,6 @@
+# Sampling script for local disordered regions
+# created by OZ, 1/8/25
+
 import os
 import yaml
 import torch

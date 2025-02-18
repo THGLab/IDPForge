@@ -1,3 +1,8 @@
+"""
+Modified from ESM2
+Copyright (c) Meta Platforms, Inc. and affiliates.
+"""
+
 import typing as T
 import torch
 import numpy as np

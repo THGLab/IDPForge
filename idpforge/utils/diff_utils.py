@@ -1,3 +1,12 @@
+"""
+Adapted from https://github.com/RosettaCommons/RFdiffusion.git
+
+Copyright (c) 2023 University of Washington. Developed at the Institute for
+Protein Design by Joseph Watson, David Juergens, Nathaniel Bennett, Brian Trippe
+and Jason Yim. This copyright and license covers both the source code and model
+weights referenced for download in the README file.
+"""
+
 import torch 
 import numpy as np
 import pickle
@@ -8,7 +17,6 @@ from idpforge.utils.igso3_utils import Exp, calculate_igso3
 from idpforge.utils.np_utils import get_chi_angles, rigid_from_3_points_np
 from idpforge.utils.definitions import backbone_atom_positions
 
-#adapted from https://github.com/RosettaCommons/RFdiffusion.git
 
 def wrap_rad(x):
     return np.mod(x + np.pi, 2 * np.pi) - np.pi
