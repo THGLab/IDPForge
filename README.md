@@ -8,7 +8,7 @@ The environment can be built via `conda env create -f env.yml`. This repo also r
 
 ESM2 utilities are refactored into this repo for network modules and exploring the effects of ESM embedding on IDP modeling. Alternatively, it can be installed from their github https://github.com/facebookresearch/esm.git, or via pip install `pip install fair-esm`.
 
-Models weights and an example training data and other inference input files can be downloaded from [Figshare](DOI: 10.6084/m9.figshare.28414937). Unzip and move them to the corresponding folder before running scripts.
+Models weights and an example training data and other inference input files can be downloaded from [Figshare](https://doi.org/10.6084/m9.figshare.28414937). Unzip and move them to the corresponding folder before running scripts.
 
 ## Training
 

@@ -1,6 +1,6 @@
 ## Documentation
 
-Relavent data files can be downloaded from DOI: 10.6084/m9.figshare.28414937.
+Relavent data files can be downloaded from https://doi.org/10.6084/m9.figshare.28414937.
 
 `train_idr_seqs.fasta`: IDP/IDRs training sequences from DisProt and IDRome (https://github.com/KULL-Centre/_2023_Tesei_IDRome.git).
 
