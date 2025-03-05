@@ -1,0 +1,45 @@
+# tensor dumps
+*.pt
+# Compiler Output #
+###################
+*.py[cod]
+*.so
+*.o
+*.exe
+*.class
+
+# Folders #
+###########
+bin/
+build/
+dist/
+scripts/
+local/
+tmp/
+__pycache__/
+*.egg-info/
+.idea/
+.ipynb_checkpoints/
+.vscode/
+esm/dev
+local/
+weights/
+
+# Cluster Ouputs #
+submit*.slurm
+submit*.sh
+slurm_logs/
+slurm*.out
+*.ipynb
+aflex.py
+configs/aflex_ldr.yml
+data/example_*
+data/diff_igso3.pkl
+
+# Junk #
+########
+.DS_Store*
+.*.swp
+*.swp
+*.log
+*~

@@ -1,0 +1,49 @@
+model:
+  t_embed_dim: 32
+  t2d_params:
+    DMIN: 3.0
+    DMAX: 39.0
+    DBINS: 32
+    ABINS: 32
+  self_condition: true
+  trunk:
+    num_blocks: 2
+    sequence_state_dim: 128
+    pairwise_state_dim: 64
+    sequence_head_width: 32
+    pairwise_head_width: 32
+    max_recycles: 3
+    recycle_min_bin: 3.375
+    recycle_max_bin: 39.375
+    structure_module:
+      c_s: 256
+      c_z: 64
+      c_ipa: 16
+      c_resnet: 128
+      no_heads_ipa: 8
+      no_qk_points: 4
+      no_v_points: 8
+      dropout_rate: 0.1
+      no_blocks: 4
+      no_transition_layers: 1
+      no_resnet_blocks: 2
+      no_angles: 7
+sequence: GSMTPSTPPRSRGTRYLAQPSGNTSSSALMQGQKTPQKPSQNLVPVTPSTTKSFKNAPLLAPPNSNMGMTSPFNGLTSPQRSPFPKSSVKRT
+potential: false
+potential_cfg:
+  pre:
+    exp_path: data/sic1_pre_exp.txt
+    exp_mask_p: 0.8
+  timescale: 10 
+  grad_clip: 0.1
+sec_path: data/example_sec.txt 
+diffuse:
+  n_tsteps: 200
+  inference_steps: 40
+  end: 149
+relax:
+  max_iterations: 0
+  tolerance: 2.39
+  stiffness: 10.0
+  max_outer_iterations: 10
+  exclude_residues: []
