@@ -36,11 +36,11 @@ potential_cfg:
     exp_mask_p: 0.8
   timescale: 10 
   grad_clip: 0.1
-sec_path: data/example_sec.txt 
+sec_path: data/example_data.pkl
 diffuse:
   n_tsteps: 200
   inference_steps: 40
-  end: 149
+  tseed: 149
 relax:
   max_iterations: 0
   tolerance: 2.39

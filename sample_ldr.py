@@ -35,7 +35,7 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
     denoiser = Denoiser(settings["diffuse"]["inference_steps"], diffuser)
     model = IDPForge(settings["diffuse"]["n_tsteps"], 
         settings["diffuse"]["inference_steps"], 
-        mlc.ConfigDict(settings["model"]), t_end=settings["diffuse"]["end"],
+        mlc.ConfigDict(settings["model"]), t_end=settings["diffuse"]["tseed"],
     )
     if attn_chunk_size is not None:
         model.set_chunk_size(attn_chunk_size)
@@ -60,7 +60,6 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
     relax_config = settings["relax"] 
     # use exclude_residues to apply restraints on folded structures
     relax_config["exclude_residues"] = np.where(fold_data["mask"])[0].tolist()
-    viol = 0.025 if attn_chunk_size < len(sequence) else 0.025*sum(fold_data["mask"])/len(sequence)
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
     
@@ -78,7 +77,7 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
                 template_cfgs=template)
         output_to_pdb(outputs, relax=mlc.ConfigDict(relax_config), 
                 save_path=output_dir, counter=start+1,
-                counter_cap=nsample, drop_viol=viol)
+                counter_cap=nsample, viol_mask=~fold_data["mask"])
         start = len(glob(output_dir+"/*_relaxed.pdb"))
         
     print("done")

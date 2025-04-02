@@ -94,7 +94,7 @@ def input_process(
     
 
 def output_to_pdb(output: T.Dict, select_idx=None, relax=None, save_path=None, 
-        counter=0, counter_cap=500, drop_viol=0.025) -> T.List[str]:
+        counter=0, counter_cap=500, **kwargs) -> T.List[str]:
     """Returns the pbd (file) string from the model given the model output."""
     # atom14_to_atom37 must be called first, as it fails on latest numpy if the
     # input is a numpy array. It will work if the input is a torch tensor.
@@ -128,6 +128,6 @@ def output_to_pdb(output: T.Dict, select_idx=None, relax=None, save_path=None,
         if counter > counter_cap:
             return
         counter += relax_protein(relax, "cuda" if torch.cuda.is_available() else "cpu",
-            p, save_path, counter, drop_viol)
+            p, save_path, counter, **kwargs)
     
 

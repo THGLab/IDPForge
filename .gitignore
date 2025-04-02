@@ -31,7 +31,10 @@ submit*.sh
 slurm_logs/
 slurm*.out
 *.ipynb
+
+# Dev #
 aflex.py
+idpforge/utils/prep_sec.py
 configs/aflex_ldr.yml
 data/example_*
 data/diff_igso3.pkl

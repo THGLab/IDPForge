@@ -4,7 +4,7 @@ A transformer protein language diffusion model to create all-atom IDP ensembles 
 
 ## Getting started
 
-The environment can be built via `conda env create -f env.yml`. This repo also requires `openfold` utilities, please refer to https://openfold.readthedocs.io/en/latest/Installation.html for installation instructions.
+The environment can be built via `conda env create -f env.yml`, and optionally `pip install -e .`. This repo also requires `openfold` utilities, please refer to https://openfold.readthedocs.io/en/latest/Installation.html for installation instructions.
 
 ESM2 utilities are refactored into this repo for network modules and exploring the effects of ESM embedding on IDP modeling. Alternatively, it can be installed from their github https://github.com/facebookresearch/esm.git, or via pip install `pip install fair-esm`.
 
