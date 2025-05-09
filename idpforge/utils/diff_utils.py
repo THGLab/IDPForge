@@ -684,6 +684,10 @@ class Diffuser:
         T,
         crd_scale=0.25,
         var_scale=1.,
+        euclid_b0=0.01,
+        euclid_bT=0.06,
+        tor_b0=0.01,
+        tor_bT=0.06,
         cache=None
     ):
         """
@@ -702,8 +706,8 @@ class Diffuser:
         )
 
         # get backbone translation diffuser
-        self.eucl_diffuser = EuclideanDiffuser(self.T)
-        self.tor_diffuser = TorsionDiffuser(self.T)
+        self.eucl_diffuser = EuclideanDiffuser(self.T, euclid_b0, euclid_bT)
+        self.tor_diffuser = TorsionDiffuser(self.T, tor_b0, tor_bT)
 
         print("Successful diffuser __init__")
 

@@ -31,7 +31,9 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
         batch_size=32, nsample=200, attn_chunk_size=None, device="cpu"):
 
     settings = yaml.safe_load(open(sample_cfg, "r"))
-    diffuser = Diffuser(settings["diffuse"]["n_tsteps"])
+    diffuser = Diffuser(settings["diffuse"]["n_tsteps"],
+        euclid_b0=settings["diffuse"]["euclid_b0"], euclid_bT=settings["diffuse"]["euclid_bT"],
+        tor_b0=settings["diffuse"]["torsion_b0"], tor_bT=settings["diffuse"]["torsion_bT"])
     denoiser = Denoiser(settings["diffuse"]["inference_steps"], diffuser)
     model = IDPForge(settings["diffuse"]["n_tsteps"], 
         settings["diffuse"]["inference_steps"], 

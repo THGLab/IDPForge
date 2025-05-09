@@ -25,7 +25,9 @@ def main(args):
     seed_everything(args.seed)
     settings = yaml.safe_load(open(args.model_config_path, "r"))
     # data
-    diffuser = Diffuser(settings["diffuse"]["n_tsteps"])
+    diffuser = Diffuser(settings["diffuse"]["n_tsteps"], 
+        euclid_b0=settings["diffuse"]["euclid_b0"], euclid_bT=settings["diffuse"]["euclid_bT"], 
+        tor_b0=settings["diffuse"]["torsion_b0"], tor_bT=settings["diffuse"]["torsion_bT"])
     denoiser = Denoiser(settings["diffuse"]["n_tsteps_inf"], diffuser)
     data_module = IDPloader([settings["data"]["path"] + f"{n}.pkl" for n in settings["data"]["idpseq"]], 
                     diffuser=diffuser,

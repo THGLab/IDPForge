@@ -47,6 +47,10 @@ training:
 diffuse:
   n_tsteps: 200
   n_tsteps_inf: 40
+  euclid_b0: 0.01
+  euclid_bT: 0.08
+  torsion_b0: 0.01
+  torsion_bT: 0.06
 model:
   t_embed_dim: 32
   t2d_params:

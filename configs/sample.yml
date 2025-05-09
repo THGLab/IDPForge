@@ -41,6 +41,10 @@ diffuse:
   n_tsteps: 200
   inference_steps: 40
   tseed: 149
+  euclid_b0: 0.01
+  euclid_bT: 0.08
+  torsion_b0: 0.01
+  torsion_bT: 0.06
 relax:
   max_iterations: 0
   tolerance: 2.39
