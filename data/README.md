@@ -32,8 +32,6 @@ sec, seq, crd = parse_pdb("input.pdb")
 
 `diff_igso3.pkl`: cached IGSO3 discretization for 200 timesteps on a linear schedule; will generate based on diffusion schedule parameters if not provided.
 
-`AF-P63027_ndr.npz`: an example N-IDR template file, generated using `mk_ldr_template.py`.
-
 `sic1_pre_exp.txt`: Sic1 PRE data file (in distance-based representation).
 
 `example_sec.txt`: compiled secondary structure encoding examples; can be customized based on sampling needs. For example, generate based on sequence preference based on the training data from:

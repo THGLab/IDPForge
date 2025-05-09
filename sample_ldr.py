@@ -55,7 +55,7 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
         s1 = f.read().split("\n")
     ss = str(fold_data["sec"])
     ss = [combine_sec(ss, d, fold_data["mask"]) for d in s1 if len(d)>sum(~fold_data["mask"])]
-    crd_offset = fold_data.get("coord_offset", None)
+    crd_offset = fold_data["coord_offset"]
 
     relax_config = settings["relax"] 
     # use exclude_residues to apply restraints on folded structures
@@ -68,10 +68,13 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
         chunk = min(batch_size, nsample - start)
         seq_list = [sequence] * chunk 
         ss_list = random.sample(ss, chunk)
-        xt_list, tor_list = denoiser.init_samples(seq_list, crd_offset)
+        xt_list, tor_list = denoiser.init_samples(seq_list)
         template = {k: torch.tensor(np.tile(v[None, ...], (chunk,) + (1,) * len(v.shape)), 
             device=model.device, dtype=torch.long if k=="mask" else torch.float) 
             for k, v in fold_data.items() if k in ["coord", "torsion", "mask"]}
+        template["coord"] -= torch.tensor(
+                crd_offset[np.random.choice(crd_offset.shape[0], chunk, replace=False)],
+                device=model.device, dtype=torch.float)[:, None, None, :]
 
         outputs = model.sample(denoiser, seq_list, ss_list, tor_list, xt_list, 
                 template_cfgs=template)

@@ -62,7 +62,7 @@ def main(ckpt_path, output_dir, sample_cfg,
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
     
-    start = 0
+    start = len(glob(output_dir+"/*_relaxed.pdb"))
     while start < nsample:
         chunk = min(batch_size, nsample - start) 
         seq_list = [settings["sequence"]] * chunk

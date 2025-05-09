@@ -116,7 +116,6 @@ def mse_frame_loss(
     return error
 
 
-
 def cb_dist_loss(pred, true_coords, loop_clamp, eps=1e-6, l_coef=1.):
     beta = pseudo_beta_fn(pred["aatype"], pred["positions"][-1], None)
     true_beta = alt_beta_fn(pred["aatype"], true_coords)

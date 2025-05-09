@@ -34,6 +34,7 @@ slurm*.out
 
 # Dev #
 aflex.py
+test_idp.py
 configs/aflex_ldr.yml
 data/example_*
 data/diff_igso3.pkl

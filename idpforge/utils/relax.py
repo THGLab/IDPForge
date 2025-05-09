@@ -28,7 +28,14 @@ def relax_protein(config, model_device, unrelaxed_protein,
         os.environ["CUDA_VISIBLE_DEVICES"] = str(model_device)
     elif "," in model_device:
         os.environ["CUDA_VISIBLE_DEVICES"] = model_device 
-    struct_str, _, viol = amber_relaxer.process(prot=unrelaxed_protein, cif_output=False)
+
+    try:
+        struct_str, _, viol = amber_relaxer.process(prot=unrelaxed_protein, cif_output=False)
+    except ValueError:
+        # likely due to a CYS protonation error
+        logger.info("Minimization failed...abort")
+        #raise
+        return 0
     aatype = unrelaxed_protein.aatype
     if len(ring_AA.intersection({a for a, v in zip(aatype, viol) if bool(v)})) > 0:
         return 0
@@ -39,7 +46,7 @@ def relax_protein(config, model_device, unrelaxed_protein,
 
     os.environ["CUDA_VISIBLE_DEVICES"] = visible_devices
     relaxation_time = time.perf_counter() - t
-    relaxed_output = os.path.join(output_dir, f'{pdb_name}_relaxed.pdb')
+    relaxed_output = os.path.join(output_dir, f'{pdb_name}_relax.pdb')
     with open(relaxed_output, 'w') as fp:
         fp.write(struct_str)
     logger.info(f"saved at {relaxed_output} with relaxation time: {relaxation_time}")

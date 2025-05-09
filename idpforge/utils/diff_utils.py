@@ -322,7 +322,7 @@ class EuclideanDiffuser:
 class TorsionDiffuser:
     # class for diffusing torsions
 
-    def __init__(self, T, b_0=0.01, b_T=0.08):
+    def __init__(self, T, b_0=0.01, b_T=0.06):
         self.T = T
         self.schedule_param = (b_0, b_T)
         self.beta_schedule = linear_beta_schedule(T, b_0, b_T)
@@ -781,7 +781,7 @@ class Denoiser:
         ntsteps,
         diffuser,
         noise_scale_ca=0.2,
-        final_noise_scale_ca=1,
+        final_noise_scale_ca=1.,
         noise_scale_frame=1,
         final_noise_scale_frame=0,
     ):
@@ -808,7 +808,7 @@ class Denoiser:
         self.trans_alphabar = np.cumprod(1 - self.trans_betabar, axis=0)
         self.tor_alphabar = np.cumprod(1 - self.tor_betabar, axis=0)
         
-    def init_samples(self, sequences, crd_offsets=None, crd_scale=None, device=torch.device("cpu")):
+    def init_samples(self, sequences, crd_scale=None, device=torch.device("cpu")):
         xyzs = []
         tors = []
         if crd_scale is None:
@@ -816,8 +816,6 @@ class Denoiser:
             
         for i, s in enumerate(sequences):
             xyz, torsion = init_sample(s, self.diffuser.T, self.diffuser.so3_diffuser, crd_scale)
-            if crd_offsets is not None:
-                xyz += crd_offsets[i]
             xyzs.append(torch.tensor(xyz, device=device, dtype=torch.float))
             tors.append(torch.tensor(torsion, device=device, dtype=torch.float))
         return xyzs, tors
