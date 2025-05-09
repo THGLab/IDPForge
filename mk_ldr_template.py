@@ -27,6 +27,9 @@ def sample_fix_distance(batch_size, fixed_distance, exclude_center=[], exclude_r
 def est_distance(n, min_clip=10):
     return max(0.03*n**2 - 0.62*n + 23, min_clip)
 
+def calc_rg(crd):
+    return np.sqrt(np.sum((crd - crd.mean(axis=0))**2, axis=-1)).mean(axis=0)
+
 
 def main(pdb, disorder_idx, nsample, **kwargs):
     crd, seq = process_pdb(pdb)
