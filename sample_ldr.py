@@ -6,6 +6,8 @@ import yaml
 import torch
 from glob import glob
 import numpy as np
+import pickle
+import pandas as pd
 import random
 import ml_collections as mlc
 from pytorch_lightning import Trainer, seed_everything
@@ -13,6 +15,7 @@ from pytorch_lightning import Trainer, seed_everything
 from idpforge.model import IDPForge
 from idpforge.utils.diff_utils import Denoiser, Diffuser
 from idpforge.misc import output_to_pdb
+from idpforge.utils.prep_sec import fetch_sec_from_seq
 
 seed_everything(42)
 
@@ -53,11 +56,19 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
     
     fold_data = np.load(fold_template)
     sequence = str(fold_data["seq"])
-    with open(settings["sec_path"], "r") as f:
-        s1 = f.read().split("\n")
-    ss = str(fold_data["sec"])
-    ss = [combine_sec(ss, d, fold_data["mask"]) for d in s1 if len(d)>sum(~fold_data["mask"])]
-    crd_offset = fold_data["coord_offset"]
+    if settings["sec_path"] is None:
+        with open(settings["data_path"], "rb") as f:
+            pkl = pickle.load(f)
+        SEC_database = pd.DataFrame({"sequence": pkl[1], "sec": pkl[0]})
+        s1 = fetch_sec_from_seq(sequence, nsample*2, SEC_database)
+        del SEC_database
+    else:
+        with open(settings["sec_path"], "r") as f:
+            ss = f.read().split("\n")
+        s1 = [s[:seq_len] for s in ss if len(s) >= seq_len]
+
+    ss = [combine_sec(str(fold_data["sec"]), d, fold_data["mask"]) for d in s1 if len(d)>sum(~fold_data["mask"])]
+    crd_offset = fold_data.get("coord_offset", None)
 
     relax_config = settings["relax"] 
     # use exclude_residues to apply restraints on folded structures
@@ -73,10 +84,14 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
         xt_list, tor_list = denoiser.init_samples(seq_list)
         template = {k: torch.tensor(np.tile(v[None, ...], (chunk,) + (1,) * len(v.shape)), 
             device=model.device, dtype=torch.long if k=="mask" else torch.float) 
-            for k, v in fold_data.items() if k in ["coord", "torsion", "mask"]}
-        template["coord"] -= torch.tensor(
-                crd_offset[np.random.choice(crd_offset.shape[0], chunk, replace=False)],
-                device=model.device, dtype=torch.float)[:, None, None, :]
+            for k, v in fold_data.items() if k in ["torsion", "mask"]}
+        if crd_offset is None:
+            # beads on a string
+            template["coord"] = torch.tensor(fold_data["coord"], device=model.device, dtype=torch.float) 
+        else:
+            # linker between rigid 
+            template["coord"] = torch.tensor(v[None, ...] - crd_offset[np.random.choice(crd_offset.shape[0], 
+                chunk, replace=False)][:, None, None, :], device=model.device, dtype=torch.float)
 
         outputs = model.sample(denoiser, seq_list, ss_list, tor_list, xt_list, 
                 template_cfgs=template)

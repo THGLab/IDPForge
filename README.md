@@ -4,7 +4,7 @@ A transformer protein language diffusion model to create all-atom IDP ensembles 
 
 ## Getting started
 
-The environment can be built via `conda env create -f env.yml`, and optionally `pip install -e .`. This repo also requires `openfold` utilities, please refer to https://openfold.readthedocs.io/en/latest/Installation.html for installation instructions. The dependencies large overlap with ones required by openfold. If you have issues installing from yml file, it is recommended to follow the installation by openfold, and then conda install other dependencies `conda install einops fairscale omegaconf hydra-core mdtraj -c conda-forge`.
+The environment can be built via `conda env create -f env.yml`, and optionally `pip install -e .`. This repo also requires `openfold` utilities, please refer to https://openfold.readthedocs.io/en/latest/Installation.html for installation instructions. The dependencies largely overlap with ones required by openfold. If you have issues installing from yml file, it is recommended to follow the installation by openfold, and then conda install other dependencies `conda install einops fairscale omegaconf hydra-core mdtraj -c conda-forge`.
 
 ESM2 utilities are refactored into this repo for network modules and exploring the effects of ESM embedding on IDP modeling. Alternatively, it can be installed from their github https://github.com/facebookresearch/esm.git, or via pip install `pip install fair-esm`.
 
@@ -70,6 +70,10 @@ Then, to generate an IDRs with folded domains ensemble, run
 python sample_ldr.py weights/mdl.ckpt data/AF-P63027_ndr.npz test configs/sample.yml --nconf 100 --cuda
 ```
 One can set the `attention_chunk` to manage memory usage for long sequences (Inference on long disordered sequences may be limited by training sequence length).
+
+### Chemical shifts prediction and evaluating ensembles with X-EISD (optional)
+
+We use UCBShift for chemical shift prediction and can be installed at https://github.com/THGLab/CSpred.git. If you wish to use X-EISD for evaluation or reweighing with experimental data, please refer to https://github.com/THGLab/X-EISDv2.
 
 ## Citation
 ```bibtex

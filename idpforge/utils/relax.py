@@ -17,7 +17,7 @@ ring_AA = {residue_constants.restypes.index(a) for a in ["F", "Y", "W", "H", "P"
 
 
 def relax_protein(config, model_device, unrelaxed_protein, 
-        output_dir, pdb_name, viol_threshold=0.01, viol_mask=None):
+        output_dir, pdb_name, viol_threshold=0.02, viol_mask=None):
     amber_relaxer = relax.AmberRelaxation(
         use_gpu=(model_device != "cpu"), **config,
     )
@@ -41,7 +41,7 @@ def relax_protein(config, model_device, unrelaxed_protein,
         return 0
     if viol_mask is None:
         viol_mask = np.ones(len(viol))
-    if sum(viol*viol_mask.astype(float))/sum(viol_mask) > viol_threshold or sum(viol) > 2:
+    if sum(viol*viol_mask.astype(float))/sum(viol_mask) > viol_threshold or sum(viol) > 4:
         return 0
 
     os.environ["CUDA_VISIBLE_DEVICES"] = visible_devices

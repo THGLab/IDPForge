@@ -28,19 +28,23 @@ model:
       no_transition_layers: 1
       no_resnet_blocks: 2
       no_angles: 7
+      trans_scale_factor: 10
+      epsilon: 0.00000001
+      inf: 100000000
 sequence: GSMTPSTPPRSRGTRYLAQPSGNTSSSALMQGQKTPQKPSQNLVPVTPSTTKSFKNAPLLAPPNSNMGMTSPFNGLTSPQRSPFPKSSVKRT
 potential: false
 potential_cfg:
   pre:
     exp_path: data/sic1_pre_exp.txt
     exp_mask_p: 0.8
-  timescale: 10 
+  timescale: 10
   grad_clip: 0.1
-sec_path: data/example_data.pkl
+sec_path: null
+data_path: data/example_data.pkl
 diffuse:
   n_tsteps: 200
   inference_steps: 40
-  tseed: 149
+  tseed: 49
   euclid_b0: 0.01
   euclid_bT: 0.08
   torsion_b0: 0.01

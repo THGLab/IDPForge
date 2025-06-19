@@ -82,3 +82,5 @@ model:
       no_resnet_blocks: 2
       no_angles: 7
       trans_scale_factor: 10
+      epsilon: 0.00000001
+      inf: 100000000

@@ -30,7 +30,7 @@ class BatchCollator:
         sequence, ss, aa_mask, residx, linker_mask = input_process(
             sequences=_batch_dict['sequence'],
             ss=_batch_dict['ss'],
-            backbone_tor=[data["torsion"][:, 1:3] for data in batch], 
+            #backbone_tor=[data["torsion"][:, 1:3] for data in batch], 
             residx=_batch_dict.get('resi', None)
         )
 

@@ -2,7 +2,8 @@ import os
 import yaml
 import torch
 import random
-
+import pickle
+import pandas as pd 
 from glob import glob
 import ml_collections as mlc
 from pytorch_lightning import Trainer, seed_everything
@@ -10,6 +11,7 @@ from pytorch_lightning import Trainer, seed_everything
 from idpforge.model import IDPForge
 from idpforge.utils.diff_utils import Denoiser, Diffuser
 from idpforge.misc import output_to_pdb
+from idpforge.utils.prep_sec import fetch_sec_from_seq
 
 seed_everything(42)
 
@@ -58,9 +60,18 @@ def main(ckpt_path, output_dir, sample_cfg,
     else:
         potential_cfg = None
     
-    with open(settings["sec_path"], "r") as f:
-        ss = f.read().split("\n")
-    ss = [s[:seq_len] for s in ss if len(s) >= seq_len]
+
+    if settings["sec_path"] is None:
+        with open(settings["data_path"], "rb") as f:
+            pkl = pickle.load(f)
+        SEC_database = pd.DataFrame({"sequence": pkl[1], "sec": pkl[0]})
+        ss = fetch_sec_from_seq(settings["sequence"], nsample*2, SEC_database)
+        del SEC_database
+    else:
+        with open(settings["sec_path"], "r") as f:
+            ss = f.read().split("\n")
+        ss = [s[:seq_len] for s in ss if len(s) >= seq_len]
+
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
     

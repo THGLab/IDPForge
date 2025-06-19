@@ -9,7 +9,8 @@ from idpforge.utils.np_utils import (
 )
 
 
-def sample_fix_distance(batch_size, fixed_distance, exclude_center=[], exclude_radius=[]):
+def sample_fix_distance(batch_size, fixed_distance, 
+        exclude_center=[], exclude_radius=[], tol=0.8):
     # Generate random angles
     theta = np.random.uniform(0, 2 * np.pi, batch_size)  # Azimuthal angle
     phi = np.random.uniform(0, np.pi, batch_size)        # Polar angle
@@ -21,11 +22,11 @@ def sample_fix_distance(batch_size, fixed_distance, exclude_center=[], exclude_r
     # Exclude inits that are within exclude radius to the center
     for c, r in zip(exclude_center, exclude_radius):
         distances = np.linalg.norm(vectors - c, axis=1)
-        vectors = vectors[distances > r]
+        vectors = vectors[distances > r * tol]
     return vectors
 
-def est_distance(n, min_clip=10):
-    return max(0.03*n**2 - 0.62*n + 23, min_clip)
+def est_distance(n, min_clip=12):
+    return max(2.4 * n ** 0.588, min_clip)
 
 def calc_rg(crd):
     return np.sqrt(np.sum((crd - crd.mean(axis=0))**2, axis=-1)).mean(axis=0)
@@ -57,13 +58,13 @@ def main(pdb, disorder_idx, nsample, **kwargs):
     else:
         folded_center = crd[[disorder_idx[0]-1, disorder_idx[-1]+1], 1].mean(axis=0)
         exclude_center = [crd[:disorder_idx[0], 1].mean(axis=0), crd[disorder_idx[-1]+1:, 1].mean(axis=0)]
-        exclude_radius = [[calc_rg(crd[:disorder_idx[0], 1]), calc_rg(crd[disorder_idx[-1]+1:, 1])]
+        exclude_radius = [calc_rg(crd[:disorder_idx[0], 1]), calc_rg(crd[disorder_idx[-1]+1:, 1])]
     crd -= folded_center
     d = est_distance(len(disorder_idx), **kwargs)
-    noise_init = sample_fix_distance(nsample, d, exclude_center, [x * 0.8 for x in exclude_radius])
+    noise_init = sample_fix_distance(nsample, d, exclude_center, exclude_radius)
     while len(noise_init) < nsample:
-        noise_init = np.concatenate((noise_init, sample_fix_distance(nsample, d, exclude_center, [x * 0.8 for x in exclude_radius])))
-    permuted = noise_init[:nsample] + np.random.normal(0, d / 5, size=(nsample, 3))
+        noise_init = np.concatenate((noise_init, sample_fix_distance(nsample, d, exclude_center, exclude_radius)), axis=0)
+    permuted = noise_init[:nsample] + np.random.normal(0, 3, size=(nsample, 3))
 
     i, j = np.where(atom_mask)
     crd[i, j] = 0

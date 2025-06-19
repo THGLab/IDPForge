@@ -21,8 +21,8 @@ def parse_pdb(pdb):
     dssp = md.compute_dssp(traj, simplified=True)[0]
     phis = md.compute_phi(traj)[1][0]
     psis = md.compute_psi(traj)[1][0]
-    phis = np.concatenate(([-180], np.degrees(phis)))
-    psis = np.concatenate((np.degrees(psis), [180]))
+    phis = np.concatenate(([-np.pi], phis))
+    psis = np.concatenate((psis, [np.pi]))
     rama = assign_rama(np.stack([phis, psis], axis=-1))
     encode = "".join([dssp[i] if dssp[i] in ["H", "E"] else rama[i] for i in range(len(dssp))])
     return encode, seq, crd
@@ -34,8 +34,9 @@ sec, seq, crd = parse_pdb("input.pdb")
 
 `sic1_pre_exp.txt`: Sic1 PRE data file (in distance-based representation).
 
-`example_sec.txt`: compiled secondary structure encoding examples; can be customized based on sampling needs. For example, generate based on sequence preference based on the training data from:
+`example_sec.txt`: compiled secondary structure encoding examples; can be customized based on sampling needs (for example enforcing residues to be helices or sheets). Setting the `data_path` but deactivating `sec_path` in the config file (by default) will generate secondary structure encoding based on sequence preference based on the compiled pdb data, or can be manually generated from:
 ```bash
 cd ../idpforge/utils
 python prep_sec.py --sequence <AAA> --database <PATH_TO_DATA.pkl> --nsample 500 --output <PATH_TO_SEC.txt>
 ```
+

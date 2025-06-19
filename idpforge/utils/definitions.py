@@ -11,7 +11,7 @@ coil_types = ["A", "B", "C", "L"]
 sstype_num = len(sstypes)
 sstype_order = {sstype: i for i, sstype in enumerate(sstypes)}
 ss_lib = {v: k for k, v in sstype_order.items()}
-coil_sample_probs = {"A": 0.2, "B": 0.5, "L": 0.1, "C": 0.2} 
+coil_sample_probs = {"A": 0.25, "B": 0.45, "L": 0.1, "C": 0.2} 
 
 # ideal N, CA, C initial coordinates
 init_N = np.array([-0.5272, 1.3593, 0.000])
