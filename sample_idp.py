@@ -5,6 +5,8 @@ import random
 import pickle
 import pandas as pd 
 from glob import glob
+import pkg_resources
+
 import ml_collections as mlc
 from pytorch_lightning import Trainer, seed_everything
 
@@ -13,6 +15,7 @@ from idpforge.utils.diff_utils import Denoiser, Diffuser
 from idpforge.misc import output_to_pdb
 from idpforge.utils.prep_sec import fetch_sec_from_seq
 
+old_params = ["trunk.structure_module.ipa.linear_q_points.weight", "trunk.structure_module.ipa.linear_q_points.bias", "trunk.structure_module.ipa.linear_kv_points.weight", "trunk.structure_module.ipa.linear_kv_points.bias"]
 seed_everything(42)
 
 def main(ckpt_path, output_dir, sample_cfg,
@@ -27,8 +30,13 @@ def main(ckpt_path, output_dir, sample_cfg,
         settings["diffuse"]["inference_steps"],
         mlc.ConfigDict(settings["model"]),
     ) 
-    sd = torch.load(ckpt_path, map_location="cpu")
-    model.load_state_dict({k: v for k, v in sd["ema"]["params"].items()})
+    pl_sd = torch.load(ckpt_path, map_location="cpu")
+    if int(pkg_resources.get_distribution("openfold").version[0]) > 1:
+        sd = {k.replace("points.", "points.linear.") if k in old_params else k: v for k, v in pl_sd["ema"]["params"].items()}
+    else:
+        sd = {k: v for k, v in pl_sd["ema"]["params"].items()}
+    model.load_state_dict(sd)
+
     if device=="cuda":
         model.cuda()
     else:

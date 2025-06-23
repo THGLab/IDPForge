@@ -34,7 +34,7 @@ training:
   loss:
     weights:
       fape: 1
-      dist: 0.01
+      dist: 0.002
       angular: 0.1
       violation: 0
     fape:

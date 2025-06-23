@@ -11,6 +11,7 @@ Relavent data files can be downloaded from https://doi.org/10.6084/m9.figshare.2
 ```python
 import numpy as np
 import mdtraj as md
+import pickle
 from idpforge.utils.np_utils import (
     process_pdb, assign_rama
 )
@@ -27,7 +28,14 @@ def parse_pdb(pdb):
     encode = "".join([dssp[i] if dssp[i] in ["H", "E"] else rama[i] for i in range(len(dssp))])
     return encode, seq, crd
 
-sec, seq, crd = parse_pdb("input.pdb")
+data_pkl = [[], [], []]
+for p in pdblist:
+    sec, seq, crd = parse_pdb(p)
+    data_pkl[0].append(sec)
+    data_pkl[1].append(seq)
+    data_pkl[2].append(crd[:, :9])
+with open("data.pkl", "wb") as f:
+    pickle.dump(data_pkl, f)
 ```
 
 `diff_igso3.pkl`: cached IGSO3 discretization for 200 timesteps on a linear schedule; will generate based on diffusion schedule parameters if not provided.

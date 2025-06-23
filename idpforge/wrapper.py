@@ -89,8 +89,6 @@ class IDPForgeWrapper(pl.LightningModule):
             self.model.load_state_dict(self.ema.state_dict()["params"])
         
         in_batch = {k: batch[k] for k in ["sequence", "ss", "mask", "resi"]}
-        if torch.rand(1).item() < 0.2:
-            in_batch["ss"] = torch.zeros_like(batch["ss"]) + 7
         output = self.model.recon(self.denoiser, batch["alpha_t"], batch["x_t"], in_batch) 
         output["sstype"] = batch["ss"]
 

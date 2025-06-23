@@ -9,6 +9,8 @@ import numpy as np
 import pickle
 import pandas as pd
 import random
+import pkg_resources
+
 import ml_collections as mlc
 from pytorch_lightning import Trainer, seed_everything
 
@@ -17,6 +19,7 @@ from idpforge.utils.diff_utils import Denoiser, Diffuser
 from idpforge.misc import output_to_pdb
 from idpforge.utils.prep_sec import fetch_sec_from_seq
 
+old_params = ["trunk.structure_module.ipa.linear_q_points.weight", "trunk.structure_module.ipa.linear_q_points.bias", "trunk.structure_module.ipa.linear_kv_points.weight", "trunk.structure_module.ipa.linear_kv_points.bias"]
 seed_everything(42)
 
 def combine_sec(fold_ss, idr_ss, mask):
@@ -46,8 +49,13 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
         model.set_chunk_size(attn_chunk_size)
     else:
         attn_chunk_size = 0
-    sd = torch.load(ckpt_path, map_location="cpu")
-    model.load_state_dict({k: v for k, v in sd["ema"]["params"].items()})
+    pl_sd = torch.load(ckpt_path, map_location="cpu")
+    if int(pkg_resources.get_distribution("openfold").version[0]) > 1:
+        sd = {k.replace("points.", "points.linear.") if k in old_params else k: v for k, v in pl_sd["ema"]["params"].items()}
+    else:
+        sd = {k: v for k, v in pl_sd["ema"]["params"].items()}
+    model.load_state_dict(sd)
+
     if device=="cuda":
         model.cuda()
     else:

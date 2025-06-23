@@ -46,7 +46,7 @@ diffuse:
   inference_steps: 40
   tseed: 49
   euclid_b0: 0.01
-  euclid_bT: 0.08
+  euclid_bT: 0.06
   torsion_b0: 0.01
   torsion_bT: 0.06
 relax:
