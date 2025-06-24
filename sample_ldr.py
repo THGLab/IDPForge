@@ -98,7 +98,7 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
             template["coord"] = torch.tensor(fold_data["coord"], device=model.device, dtype=torch.float) 
         else:
             # linker between rigid 
-            template["coord"] = torch.tensor(v[None, ...] - crd_offset[np.random.choice(crd_offset.shape[0], 
+            template["coord"] = torch.tensor(fold_data["coord"][None, ...] - crd_offset[np.random.choice(crd_offset.shape[0], 
                 chunk, replace=False)][:, None, None, :], device=model.device, dtype=torch.float)
 
         outputs = model.sample(denoiser, seq_list, ss_list, tor_list, xt_list, 
