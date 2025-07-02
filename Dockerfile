@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
+FROM pytorch/pytorch:2.5.1-cuda12.1-cudnn9-runtime
 
 # Metadata
 LABEL org.opencontainers.image.authors="O Zhang"
@@ -9,20 +9,15 @@ RUN apt-get update && apt-get install -y wget git libxml2 \
  && wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.0-1_all.deb \
  && dpkg -i cuda-keyring_1.0-1_all.deb \
  && apt-get update && apt-get install -y \
-    cuda-minimal-build-12-1 libcusparse-dev-12-1 libcublas-dev-12-1 libcusolver-dev-12-1
+    cuda-nvcc-12-1 cuda-cupti-dev-12-1 \
+    libcusparse-dev-12-1 libcublas-dev-12-1 libcusolver-dev-12-1
 
-# Install Miniforge
-RUN wget -P /tmp \
-    "https://github.com/conda-forge/miniforge/releases/download/23.3.1-1/Miniforge3-Linux-x86_64.sh" \
-    && bash /tmp/Miniforge3-Linux-x86_64.sh -b -p /opt/conda \
-    && rm /tmp/Miniforge3-Linux-x86_64.sh
 ENV PATH="/opt/conda/bin:$PATH"
-
 # Install mamba and environment
 COPY env.yml /opt/idpforge/env.yml
 RUN conda install -n base mamba -c conda-forge
 RUN mamba env update -n base --file /opt/idpforge/env.yml && conda clean --all
-RUN export LD_LIBRARY_PATH=${CONDA_PREFIX}/lib:${LD_LIBRARY_PATH}
+ENV LD_LIBRARY_PATH="/opt/conda/lib:$LD_LIBRARY_PATH"
 
 # Install OpenFold
 RUN git clone https://github.com/aqlaboratory/openfold.git /opt/openfold

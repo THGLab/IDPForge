@@ -51,7 +51,7 @@ diffuse:
   torsion_bT: 0.06
 relax:
   max_iterations: 0
-  tolerance: 2.39
+  tolerance: 10.0
   stiffness: 10.0
   max_outer_iterations: 10
   exclude_residues: []

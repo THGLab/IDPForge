@@ -117,7 +117,7 @@ def output_to_pdb(output: T.Dict, select_idx=None, relax=None, save_path=None,
             atom_mask=mask,
             residue_index=resid,
             b_factors=np.zeros(pred_pos.shape[:2]),
-            #chain_index=np.zeros(pred_pos.shape[0]),
+            chain_index=np.zeros(pred_pos.shape[0]),
         )
         pdbs.append(pred)
     
