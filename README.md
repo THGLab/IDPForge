@@ -61,7 +61,7 @@ Inference time experimental guidance can be activated by the potential flag in t
 
 ### IDRs with folded domains
 
-First, to prepare the folded template, run `python init_ldr_template.py`. We provide an example for sampling the low confidence region of AF entry P63027:
+First, to prepare the folded template, run `python init_ldr_template.py`. We provide an example for sampling the low confidence region of AF entry P05231:
 ```bash
 python mk_ldr_template.py data/AF-P05231-F1-model_v4.pdb 1-41 data/AF-P05231_ndr.npz
 ```
