@@ -4,8 +4,8 @@ FROM pytorch/pytorch:2.5.1-cuda12.1-cudnn9-runtime
 LABEL org.opencontainers.image.authors="O Zhang"
 
 # Install utilities and CUDA libs
-RUN apt-get update && apt-get install -y wget git libxml2 \
- && apt-key del 7fa2af80 || true \
+RUN apt-get update && apt-get install -y wget git libxml2 && \
+ apt-key del 7fa2af80 || true \
  && wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.0-1_all.deb \
  && dpkg -i cuda-keyring_1.0-1_all.deb \
  && apt-get update && apt-get install -y \
