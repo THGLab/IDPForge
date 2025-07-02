@@ -5,7 +5,7 @@ import random
 import pickle
 import pandas as pd 
 from glob import glob
-import pkg_resources
+from importlib.metadata import version
 
 import ml_collections as mlc
 from pytorch_lightning import Trainer, seed_everything
@@ -31,7 +31,7 @@ def main(ckpt_path, output_dir, sample_cfg,
         mlc.ConfigDict(settings["model"]),
     ) 
     pl_sd = torch.load(ckpt_path, map_location="cpu")
-    if int(pkg_resources.get_distribution("openfold").version[0]) > 1:
+    if int(version("openfold").split(".")[0]) > 1:
         sd = {k.replace("points.", "points.linear.") if k in old_params else k: v for k, v in pl_sd["ema"]["params"].items()}
     else:
         sd = {k: v for k, v in pl_sd["ema"]["params"].items()}

@@ -14,8 +14,8 @@ import pkg_resources
 import ml_collections as mlc
 from pytorch_lightning import Trainer, seed_everything
 
-from idpforge.model import IDPForge
 from idpforge.utils.diff_utils import Denoiser, Diffuser
+from idpforge.model import IDPForge
 from idpforge.misc import output_to_pdb
 from idpforge.utils.prep_sec import fetch_sec_from_seq
 
