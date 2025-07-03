@@ -31,7 +31,6 @@ model:
       trans_scale_factor: 10
       epsilon: 0.00000001
       inf: 100000000
-sequence: GSMTPSTPPRSRGTRYLAQPSGNTSSSALMQGQKTPQKPSQNLVPVTPSTTKSFKNAPLLAPPNSNMGMTSPFNGLTSPQRSPFPKSSVKRT
 potential: false
 potential_cfg:
   pre:

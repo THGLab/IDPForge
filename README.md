@@ -40,6 +40,7 @@ usage: sample_idp.py [-h] [--batch BATCH] [--nconf NCONF] [--cuda]
                      ckpt_path output_dir sample_cfg
 
 positional arguments:
+  seq                protein sequence
   ckpt_path          path to model weights
   output_dir         directory to output pdbs
   sample_cfg         path to a sampling configuration yaml file
@@ -54,7 +55,8 @@ Example to generate 100 conformers for Sic1:
 
 ```bash
 mkdir test
-python sample_idp.py weights/mdl.ckpt test configs/sample.yml --nconf 100 --cuda 
+sequence="GSMTPSTPPRSRGTRYLAQPSGNTSSSALMQGQKTPQKPSQNLVPVTPSTTKSFKNAPLLAPPNSNMGMTSPFNGLTSPQRSPFPKSSVKRT"
+python sample_idp.py $sequence weights/mdl.ckpt test configs/sample.yml --nconf 100 --cuda 
 ```
 
 Inference time experimental guidance can be activated by the potential flag in the `configs/sample.yml`. An example PREs experimental data file is also provided in `data/sic1_pre_exp.txt`.

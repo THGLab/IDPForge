@@ -18,7 +18,7 @@ from idpforge.utils.prep_sec import fetch_sec_from_seq
 old_params = ["trunk.structure_module.ipa.linear_q_points.weight", "trunk.structure_module.ipa.linear_q_points.bias", "trunk.structure_module.ipa.linear_kv_points.weight", "trunk.structure_module.ipa.linear_kv_points.bias"]
 seed_everything(42)
 
-def main(ckpt_path, output_dir, sample_cfg,
+def main(sequence, ckpt_path, output_dir, sample_cfg,
         batch_size=32, nsample=200, device="cpu"):
 
     settings = yaml.safe_load(open(sample_cfg, "r"))
@@ -42,7 +42,7 @@ def main(ckpt_path, output_dir, sample_cfg,
     else:
         model.cpu()
     model.eval()
-    seq_len = len(settings["sequence"])
+    seq_len = len(sequence)
 
     if settings["potential"]:
         potential_cfg = {"potential_type": [], "weights": {},  "potential_cfg": {},
@@ -86,7 +86,7 @@ def main(ckpt_path, output_dir, sample_cfg,
     start = len(glob(output_dir+"/*_relaxed.pdb"))
     while start < nsample:
         chunk = min(batch_size, nsample - start) 
-        seq_list = [settings["sequence"]] * chunk
+        seq_list = [sequence] * chunk
         ss_list = random.sample(ss, chunk)
         xt_list, tor_list = denoiser.init_samples(seq_list)
         outputs = model.sample(denoiser, seq_list, ss_list, tor_list, xt_list, 
@@ -102,6 +102,7 @@ def main(ckpt_path, output_dir, sample_cfg,
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
+    parser.add_argument('seq')
     parser.add_argument('ckpt_path')
     parser.add_argument('output_dir')
     parser.add_argument('sample_cfg')
@@ -110,5 +111,5 @@ if __name__ == "__main__":
     parser.add_argument('--cuda', action="store_true")
 
     args = parser.parse_args()
-    main(args.ckpt_path, args.output_dir, args.sample_cfg,
+    main(args.seq, args.ckpt_path, args.output_dir, args.sample_cfg,
          args.batch, args.nconf, "cuda" if args.cuda else "cpu")
