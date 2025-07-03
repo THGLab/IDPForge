@@ -73,7 +73,7 @@ def main(sequence, ckpt_path, output_dir, sample_cfg,
         with open(settings["data_path"], "rb") as f:
             pkl = pickle.load(f)
         SEC_database = pd.DataFrame({"sequence": pkl[1], "sec": pkl[0]})
-        ss = fetch_sec_from_seq(settings["sequence"], nsample*2, SEC_database)
+        ss = fetch_sec_from_seq(sequence, nsample*2, SEC_database)
         del SEC_database
     else:
         with open(settings["sec_path"], "r") as f:

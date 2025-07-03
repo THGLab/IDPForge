@@ -73,6 +73,7 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
     else:
         with open(settings["sec_path"], "r") as f:
             ss = f.read().split("\n")
+        seq_len = len(sequence)
         s1 = [s[:seq_len] for s in ss if len(s) >= seq_len]
 
     ss = [combine_sec(str(fold_data["sec"]), d, fold_data["mask"]) for d in s1 if len(d)>sum(~fold_data["mask"])]
