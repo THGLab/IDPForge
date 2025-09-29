@@ -16,7 +16,8 @@ ENV PATH="/opt/conda/bin:$PATH"
 # Install mamba and environment
 COPY env.yml /opt/idpforge/env.yml
 RUN conda install -n base mamba -c conda-forge
-RUN mamba env update -n base --file /opt/idpforge/env.yml && conda clean --all
+RUN mamba env update -n base --file /opt/idpforge/env.yml
+RUN conda clean --all
 ENV LD_LIBRARY_PATH="/opt/conda/lib:$LD_LIBRARY_PATH"
 
 # Install OpenFold
