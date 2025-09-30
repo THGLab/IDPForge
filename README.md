@@ -17,7 +17,7 @@ docker build -t idpforge .
 ```
 To verify that your docker installation is able to properly communicate with your GPU, run
 ```bash
-docker run --rm --gpus all nvidia/cuda:11.0-base nvidia-smi
+docker run --rm --gpus all nvidia/cuda:12.3.1-base-ubuntu22.04 nvidia-smi
 ```
 
 Models weights and an example training data and other inference input files can be downloaded from [Figshare](https://doi.org/10.6084/m9.figshare.28414937). Unzip and move them to the corresponding folder before running scripts.
