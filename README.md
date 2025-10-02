@@ -13,11 +13,11 @@ Optional: `pip install flash-attn==2.3` to speed up attention calculation.
 ### Using Docker
 It can also be built as a docker container using the included dockerfile. To build it, run the following command from the root of this repository:
 ```bash
-docker build -t idpforge .
+docker build -f Dockerfile -t idpforge .
 ```
 To verify that your docker installation is able to properly communicate with your GPU, run
 ```bash
-docker run --rm --gpus all nvidia/cuda:12.3.1-base-ubuntu22.04 nvidia-smi
+docker run --rm --gpus all nvidia/cuda:12.8.1-base-ubuntu22.04 nvidia-smi
 ```
 
 Models weights and an example training data and other inference input files can be downloaded from [Figshare](https://doi.org/10.6084/m9.figshare.28414937). Unzip and move them to the corresponding folder before running scripts.

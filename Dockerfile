@@ -1,34 +1,51 @@
-FROM pytorch/pytorch:2.5.1-cuda12.1-cudnn9-runtime
+# NOTE: RUN THIS IN "IDPForge"
 
-# Metadata
+
+# Start from CUDA 12.8 so that its guaranteed
+FROM nvidia/cuda:12.8.0-devel-ubuntu22.04
+
+# Add metadata for the image. 
 LABEL org.opencontainers.image.authors="O Zhang"
 
-# Install utilities and CUDA libs
-RUN apt-get update && apt-get install -y wget git libxml2 && \
- apt-key del 7fa2af80 || true \
- && wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.0-1_all.deb \
- && dpkg -i cuda-keyring_1.0-1_all.deb \
- && apt-get update && apt-get install -y \
-    cuda-nvcc-12-1 cuda-cupti-dev-12-1 \
-    libcusparse-dev-12-1 libcublas-dev-12-1 libcusolver-dev-12-1
+# Install essential system tools in a single, clean layer to reduce image size.
+RUN apt-get update && apt-get install -y \
+    wget \
+    git \
+    libxml2 \
+    && rm -rf /var/lib/apt/lists/*
 
-ENV PATH="/opt/conda/bin:$PATH"
-# Install mamba and environment
-COPY env.yml /opt/idpforge/env.yml
-RUN conda install -n base mamba -c conda-forge
-RUN conda env update -n base --file /opt/idpforge/env.yml --solver=libmamba
-RUN conda clean --all
-ENV LD_LIBRARY_PATH="/opt/conda/lib:$LD_LIBRARY_PATH"
+# Set up miniconda
+ENV CONDA_DIR="/opt/conda"
+RUN wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda.sh && \
+    /bin/bash ~/miniconda.sh -b -p $CONDA_DIR && \
+    rm ~/miniconda.sh
+ENV PATH="$CONDA_DIR/bin:$PATH"
 
-# Install OpenFold
+# Auto-accept tos
+RUN conda tos accept
+
+# Install PyTorch using pip to get the latest CUDA 12.8-specific version
+RUN pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu128
+
+# Install the rest of the dependencies using env.yml
+COPY ./env.yml /opt/idpforge/env.yml
+RUN conda install -n base mamba -c conda-forge && \
+    conda env update -n base --file /opt/idpforge/env.yml --solver=libmamba && \
+    conda clean --all
+
+# Install/upgrade essential Python build tools before compiling OpenFold from source
+RUN pip install --upgrade pip setuptools wheel
+
+# Clone OpenFold 
 RUN git clone https://github.com/aqlaboratory/openfold.git /opt/openfold
+
+# Move modified OpenFold into the newly cloned OpenFold directory
+COPY ./openfold_setup.py /opt/openfold/setup.py
 RUN wget -q -P /opt/openfold/openfold/resources \
-    https://git.scicore.unibas.ch/schwede/openstructure/-/raw/7102c63615b64735c4941278d92b554ec94415f8/modules/mol/alg/src/stereo_chemical_props.txt
-WORKDIR /opt/openfold
-RUN python3 setup.py install
+    https://git.scicore.unibas.ch/schwede/openstructure/-/raw/7102c63615b64735c4941278d92b554ec94415f8/modules/mol/alg/src/stereo_chemical_props.txt && \
+    cd /opt/openfold && \
+    pip install .
 
-# Copy your idpforge
-COPY . /opt/idpforge
-WORKDIR /opt/idpforge
-
-
+# Copy the main application code and set the working directory. 
+COPY . /app
+WORKDIR /app
