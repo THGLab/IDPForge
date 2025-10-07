@@ -1,13 +1,13 @@
-# NOTE: RUN THIS IN "IDPForge"
+# NOTE: RUN THIS FROM *INSIDE* THE IDPForge DIRECTORY
 
 
-# Start from CUDA 12.8 so that its guaranteed
-FROM nvidia/cuda:12.8.0-devel-ubuntu22.04
+# Start from CUDA 12.1, which is a more established toolkit version
+FROM nvidia/cuda:12.1.1-devel-ubuntu22.04
 
-# Add metadata for the image. 
+# Add metadata for the image.
 LABEL org.opencontainers.image.authors="O Zhang"
 
-# Install essential system tools in a single, clean layer to reduce image size.
+# Install essential system tools
 RUN apt-get update && apt-get install -y \
     wget \
     git \
@@ -24,8 +24,8 @@ ENV PATH="$CONDA_DIR/bin:$PATH"
 # Auto-accept tos
 RUN conda tos accept
 
-# Install PyTorch using pip to get the latest CUDA 12.8-specific version
-RUN pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu128
+# Install PyTorch 2.5.1 using the specific CUDA 12.1 wheel
+RUN conda install pytorch==2.5.1 pytorch-cuda=12.1 -c pytorch -c nvidia
 
 # Install the rest of the dependencies using env.yml
 COPY ./env.yml /opt/idpforge/env.yml
@@ -36,16 +36,16 @@ RUN conda install -n base mamba -c conda-forge && \
 # Install/upgrade essential Python build tools before compiling OpenFold from source
 RUN pip install --upgrade pip setuptools wheel
 
-# Clone OpenFold 
+# Clone OpenFold
 RUN git clone https://github.com/aqlaboratory/openfold.git /opt/openfold
 
-# Move modified OpenFold into the newly cloned OpenFold directory
-COPY ./openfold_setup.py /opt/openfold/setup.py
+# Move modified OpenFold setup.py into the newly cloned OpenFold directory and install
+COPY ./openfold_setup_12.1.py /opt/openfold/setup.py
 RUN wget -q -P /opt/openfold/openfold/resources \
     https://git.scicore.unibas.ch/schwede/openstructure/-/raw/7102c63615b64735c4941278d92b554ec94415f8/modules/mol/alg/src/stereo_chemical_props.txt && \
     cd /opt/openfold && \
     pip install .
 
-# Copy the main application code and set the working directory. 
+# Copy the main application code and set the working directory.
 COPY . /app
 WORKDIR /app

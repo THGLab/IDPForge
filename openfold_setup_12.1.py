@@ -52,12 +52,11 @@ def get_cuda_bare_metal_version(cuda_dir):
         return raw_output, bare_metal_major, bare_metal_minor
 
 compute_capabilities = set([
-    (5, 2), # Titan X
-    (6, 1), # GeForce 1000-series
-    (9, 0), # Hopper
-    (12, 0),# Blackwell
+    (6, 1), # Pascal
+    (7, 0), # Volta
+    (8, 0), # Ampere (A40/A100)
 ])
-
+"""
 compute_capabilities.add((7, 0))
 _, bare_metal_major, _ = get_cuda_bare_metal_version(CUDA_HOME)
 if int(bare_metal_major) >= 11:
@@ -66,7 +65,7 @@ if int(bare_metal_major) >= 11:
 compute_capability, _ = get_nvidia_cc()
 if compute_capability is not None:
     compute_capabilities = set([compute_capability])
-
+"""
 cc_flag = []
 for major, minor in list(compute_capabilities):
     cc_flag.extend([
@@ -76,39 +75,27 @@ for major, minor in list(compute_capabilities):
 
 extra_cuda_flags += cc_flag
 
-if bare_metal_major != -1:
-    modules = [CUDAExtension(
-        name="attn_core_inplace_cuda",
-        sources=[
-            "openfold/utils/kernel/csrc/softmax_cuda.cpp",
-            "openfold/utils/kernel/csrc/softmax_cuda_kernel.cu",
-        ],
-        include_dirs=[
-            os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                'openfold/utils/kernel/csrc/'
-            )
-        ],
-        extra_compile_args={
-            'cxx': ['-O3'] + version_dependent_macros,
-            'nvcc': (
-                ['-O3', '--use_fast_math'] +
-                version_dependent_macros +
-                extra_cuda_flags
-            ),
-        }
-    )]
-else:
-    modules = [CppExtension(
-        name="attn_core_inplace_cuda",
-        sources=[
-            "openfold/utils/kernel/csrc/softmax_cuda.cpp",
-            "openfold/utils/kernel/csrc/softmax_cuda_stub.cpp",
-        ],
-        extra_compile_args={
-            'cxx': ['-O3'],
-        }
-    )]
+modules = [CUDAExtension(
+    name="attn_core_inplace_cuda",
+    sources=[
+        "openfold/utils/kernel/csrc/softmax_cuda.cpp",
+        "openfold/utils/kernel/csrc/softmax_cuda_kernel.cu",
+    ],
+    include_dirs=[
+        os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            'openfold/utils/kernel/csrc/'
+        )
+    ],
+    extra_compile_args={
+        'cxx': ['-O3'] + version_dependent_macros,
+        'nvcc': (
+            ['-O3', '--use_fast_math'] +
+            version_dependent_macros +
+            extra_cuda_flags
+        ),
+    }
+)]
 
 setup(
     name='openfold',
