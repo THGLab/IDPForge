@@ -24,14 +24,14 @@ ENV PATH="$CONDA_DIR/bin:$PATH"
 # Auto-accept tos
 RUN conda tos accept
 
-# Install PyTorch using pip to get the latest CUDA 12.8-specific version
-RUN conda install pytorch==2.7.1 pytorch-cuda=12.8 -c pytorch -c nvidia
-
 # Install the rest of the dependencies using env.yml
 COPY ./env.yml /opt/idpforge/env.yml
 RUN conda install -n base mamba -c conda-forge && \
     conda env update -n base --file /opt/idpforge/env.yml --solver=libmamba && \
     conda clean --all
+
+# Install PyTorch 2.7.1 using the specific CUDA 12.8 wheel
+RUN pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu128
 
 # Install/upgrade essential Python build tools before compiling OpenFold from source
 RUN pip install --upgrade pip setuptools wheel

@@ -56,16 +56,7 @@ compute_capabilities = set([
     (7, 0), # Volta
     (8, 0), # Ampere (A40/A100)
 ])
-"""
-compute_capabilities.add((7, 0))
-_, bare_metal_major, _ = get_cuda_bare_metal_version(CUDA_HOME)
-if int(bare_metal_major) >= 11:
-    compute_capabilities.add((8, 0))
 
-compute_capability, _ = get_nvidia_cc()
-if compute_capability is not None:
-    compute_capabilities = set([compute_capability])
-"""
 cc_flag = []
 for major, minor in list(compute_capabilities):
     cc_flag.extend([
