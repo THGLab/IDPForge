@@ -25,7 +25,7 @@ ENV PATH="$CONDA_DIR/bin:$PATH"
 RUN conda tos accept
 
 # Install the rest of the dependencies using env.yml
-COPY ./env.yml /opt/idpforge/env.yml
+COPY ./dockerfiles/env.yml /opt/idpforge/env.yml
 RUN conda install -n base mamba -c conda-forge && \
     conda env update -n base --file /opt/idpforge/env.yml --solver=libmamba && \
     conda clean --all
@@ -40,7 +40,7 @@ RUN pip install --upgrade pip setuptools wheel
 RUN git clone https://github.com/aqlaboratory/openfold.git /opt/openfold
 
 # Move modified OpenFold setup.py into the newly cloned OpenFold directory and install
-COPY ./openfold_setup_12.8.py /opt/openfold/setup.py
+COPY ./dockerfiles/openfold_setup_12.8.py /opt/openfold/setup.py
 RUN wget -q -P /opt/openfold/openfold/resources \
     https://git.scicore.unibas.ch/schwede/openstructure/-/raw/7102c63615b64735c4941278d92b554ec94415f8/modules/mol/alg/src/stereo_chemical_props.txt && \
     cd /opt/openfold && \

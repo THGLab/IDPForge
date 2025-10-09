@@ -11,16 +11,31 @@ ESM2 utilities are refactored into this repo for network modules and exploring t
 Optional: `pip install flash-attn==2.3` to speed up attention calculation.
 
 ### Using Docker
-It can also be built as a docker container using the included dockerfile. To build it, run the following command from the root of this repository:
+It can also be built as a docker container using either of the included dockerfiles (Blackwell or Hopper). Blackwell runs on CUDA12.8 and Hopper runs on CUDA12.1. To build it, run the following command from the root of this repository:
 ```bash
-docker build -f Dockerfile -t idpforge .
+docker build -f dockerfiles/Dockerfile_[Blackwell/Hopper] -t idpforge:latest .
+```
+To confirm that your idpforge:latest image is successfully completed, run
+```bash
+docker images
+```
+To run a container from the newly created image, run
+```bash
+docker run --rm -it --gpus all idpforge:latest
 ```
 To verify that your docker installation is able to properly communicate with your GPU, run
 ```bash
 docker run --rm --gpus all nvidia/cuda:12.8.1-base-ubuntu22.04 nvidia-smi
 ```
 
-Models weights and an example training data and other inference input files can be downloaded from [Figshare](https://doi.org/10.6084/m9.figshare.28414937). Unzip and move them to the corresponding folder before running scripts.
+Models weights and an example training data and other inference input files can be downloaded from [Figshare](https://doi.org/10.6084/m9.figshare.28414937). Unzip them into a corresponding folder. It is recommended to merge it with the cloned version of this repository. Directories can be added into a container by mounting them as follows.
+```bash
+docker run --rm -it --gpus all \
+    -v "[path-to-directory]":/app/[directory-name-in-container] \
+    # Optional: any other mounts... \
+    idpforge:latest
+```
+Examples of this are given in later sections.
 
 ## Training
 
@@ -61,6 +76,19 @@ python sample_idp.py $sequence weights/mdl.ckpt test configs/sample.yml --nconf 
 
 Inference time experimental guidance can be activated by the potential flag in the `configs/sample.yml`. An example PREs experimental data file is also provided in `data/sic1_pre_exp.txt`.
 
+This can also be run within the previously created docker image. Set the working directory to the root of the previously cloned and merged version of this repository and run the following.
+```bash
+mkdir test
+sequence="GSMTPSTPPRSRGTRYLAQPSGNTSSSALMQGQKTPQKPSQNLVPVTPSTTKSFKNAPLLAPPNSNMGMTSPFNGLTSPQRSPFPKSSVKRT"
+docker run -it --rm --gpus all \
+    -v "./test/":/app/output \
+    -v "./data/":/app/data \
+    -v "./weights/":/app/weights \
+    -w /app \
+    idpforge:latest \
+    python -u /app/sample_idp.py $sequence /app/weights/mdl.ckpt /app/output /app/configs/sample.yml --nconf 100 --cuda
+```
+
 ### IDRs with folded domains
 
 First, to prepare the folded template, run `python init_ldr_template.py`. We provide an example for sampling the low confidence region of AF entry P05231:
@@ -75,6 +103,18 @@ mkdir P05231_build
 python sample_ldr.py weights/mdl.ckpt data/AF-P05231_ndr.npz P05231_build configs/sample.yml --nconf 100 --cuda
 ```
 One can set the `attention_chunk` to manage memory usage for long sequences (Inference on long disordered sequences may be limited by training sequence length).
+
+This can also be run within the previously created docker image. Set the working directory to the root of the previously cloned and merged version of this repository and run the following.
+```bash
+mkdir P05231_build
+docker run -it --rm --gpus all \
+    -v "./P05231_build/":/app/output \
+    -v "./data/":/app/data \
+    -v "./weights/":/app/weights \
+    -w /app \
+    idpforge:latest \
+    python -u /app/sample_ldr.py /app/weights/mdl.ckpt /app/data/AF-P05231_ndr.npz /app/output /app/configs/sample.yml --nconf 100 --cuda
+```
 
 ### Chemical shifts prediction and evaluating ensembles with X-EISD (optional)
 
