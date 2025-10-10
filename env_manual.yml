@@ -1,0 +1,40 @@
+# Adapted from Openfold
+
+name: idpforge
+channels:
+  - conda-forge
+  - bioconda
+  - pytorch
+  - nvidia 
+dependencies:
+  - nvidia/label/cuda-12.8.0::cuda-toolkit # 12.8
+  - mdtraj=1.9.*
+  - einops
+  - gcc=12.4
+  - python=3.10
+  - setuptools=59.5.0
+  - pip
+  - openmm
+  - pdbfixer
+  - pytorch-lightning
+  - biopython
+  - numpy
+  - pandas
+  - PyYAML
+  - requests
+  - scipy
+  - tqdm
+  - typing-extensions
+  - wandb
+  - modelcif
+  - awscli
+  - ml-collections
+  - aria2
+  - mkl
+  - git
+  - bioconda::hmmer
+  - bioconda::hhsuite
+  - bioconda::kalign2
+  - pip:
+      - dm-tree==0.1.6
+      - git+https://github.com/NVIDIA/dllogger.git
