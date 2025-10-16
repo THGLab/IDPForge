@@ -21,7 +21,9 @@ ESM2 utilities are refactored into this repo for network modules and exploring t
 Optional: `pip install flash-attn==2.3` to speed up attention calculation.
 
 ### Using Docker
-IDPForge can also be built as a docker container using either of the included dockerfiles (Blackwell or Ampere). Blackwell runs on CUDA12.8 and Ampere runs on CUDA12.1. To build the image, run the following command from the root of this repository:
+IDPForge can also be built as a docker container using either of the included dockerfiles (Blackwell or Ampere). Blackwell runs on CUDA12.8 and Ampere runs on CUDA12.1. Models weights and an example training data and other inference input files can be downloaded from [Figshare](https://doi.org/10.6084/m9.figshare.28414937). Optionally, the files may be merged before the creation of the image. This will ensure the image contains the merged files, removing the need for additional /weights and /data mounting.
+
+To build the image, run the following command from the root of this repository:
 ```bash
 docker build -f dockerfiles/Dockerfile_[Blackwell/Ampere] -t idpforge:latest .
 ```
@@ -37,8 +39,7 @@ To verify that your docker installation is able to properly communicate with you
 ```bash
 docker run --rm --gpus all nvidia/cuda:12.8.1-base-ubuntu22.04 nvidia-smi
 ```
-
-Models weights and an example training data and other inference input files can be downloaded from [Figshare](https://doi.org/10.6084/m9.figshare.28414937). Optionally, the files may be merged before the creation of the image. This will ensure the image contains the merged files, removing the need for additional /weights and /data mounting. Once the image is created, outside directories can be added into a container by mounting them as follows.
+Once the image is created, outside directories can be added into a container by mounting them as follows.
 ```bash
 docker run --rm -it --gpus all \
     -v "[path-to-directory]":/app/[directory-name-in-container] \
