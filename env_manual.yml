@@ -1,4 +1,19 @@
-# Adapted from openfold
+# -----------------------------------------------------------------
+# Manual Conda Environment Specification for IDPForge
+#
+# This environment provides all dependencies to run the IDPForge 
+# software stack. 
+#
+# 3 lines involved for changing the torch and cuda versions are 
+# marked with comments on the side. Choose either the Default
+# or Alternative for all 3 lines. 
+#
+# Default: Pascal (sm_60) to Ampere (sm_80). 
+# Recommended for HPC use.
+#
+# Alternative: Pascal (sm_60) to Blackwell (sm_120).
+# Recommended for GPUs released on or after 2024. 
+# -----------------------------------------------------------------
 
 name: idpforge
 channels:
@@ -7,20 +22,36 @@ channels:
   - pytorch
   - nvidia 
 dependencies:
-  - cuda
+  # --- Core Build & Python ---
   - gcc=12.4
   - python=3.10
   - setuptools=59.5.0
   - pip
+  - mkl
+  - git
+
+  # --- CUDA Toolkit ---
+  # Provides the 'nvcc' compiler. Must match the PyTorch build.
+  - nvidia::cuda-toolkit=12.1 # Default: 12.1 || Alternative: 12.8
+
+  # --- Scientific & MD Libraries ---
   - openmm
   - pdbfixer
-  - pytorch-lightning
   - biopython
   - numpy
   - pandas
+  - scipy
+  - mdtraj
+  
+  # --- Bioinformatics Tools ---
+  - bioconda::hmmer
+  - bioconda::hhsuite
+  - bioconda::kalign2
+
+  # --- ML & Utility Libraries ---
+  - pytorch-lightning
   - PyYAML
   - requests
-  - scipy
   - tqdm
   - typing-extensions
   - wandb
@@ -28,16 +59,19 @@ dependencies:
   - awscli
   - ml-collections
   - aria2
-  - mkl
-  - git
-  - bioconda::hmmer
-  - bioconda::hhsuite
-  - bioconda::kalign2
-  - pytorch::pytorch=2.5
-  - pytorch::pytorch-cuda=12.4
   - einops
-  - mdtraj
+  
+  # --- PIP Dependencies ---
   - pip:
+      # This index provides PyTorch builds compiled against the chosen cuda version.
+      - --extra-index-url https://download.pytorch.org/whl/cu121 # Default: cu121 || Alternative: cu128
+      
+      # Specific PyTorch build for the chosen cuda version.
+      - torch==2.5.1 # Default: 2.5.1 || Alternative: 2.7.1
+      
+      # Other core ML dependencies
       - deepspeed==0.14.5
       - dm-tree==0.1.6
-      - git+https://github.com/NVIDIA/dllogger.git
+    
+      # Pin git-based dependency to a specific commit for reproducibility.
+      - git+https://github.com/NVIDIA/dllogger.git@0478734ff7be75adde8d160e04872664d1c62e5f

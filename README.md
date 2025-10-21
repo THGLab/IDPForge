@@ -4,17 +4,19 @@ A transformer protein language diffusion model to create all-atom IDP ensembles 
 
 ## Getting started
 
-To get started, both this and the openfold repository must be cloned in the same directory. Following that, the working conda environment can be established in two ways.
+To get started, both this and the openfold repository must be cloned in the same directory via the `git clone` command. Following that, the working conda environment can be established in two ways.
 
-The environment can be built via `conda env create -f env.yml`, and optionally `pip install -e .`. This repo also requires `openfold` utilities, please refer to https://openfold.readthedocs.io/en/latest/Installation.html for installation instructions. The dependencies largely overlap with ones required by openfold. 
+The base environment can be built manually via the `env_manual.yml` file in the repo. The default file is set to install `torch==2.5.1 and cuda==12.1` for earlier GPUs (sm_60 - sm_80). Optionally, this may be changed to install `torch==2.7.1 and cuda==12.8` for later generation GPUs (sm_60 - sm_120). Refer to the comments in the file for modification instructions. 
+
+Once the `env_manual.yml` file is set, the base environment can be created using the `conda env create -f env_manual.yml` and `pip install -e .` commands. This repo also requires `openfold` utilities, please refer to https://openfold.readthedocs.io/en/latest/Installation.html for installation instructions. The dependencies largely overlap with ones required by openfold. 
 
 If you have issues installing from yml file, it is recommended to follow the installation by openfold, and then activate the environment and install other dependencies via `conda install einops mdtraj -c conda-forge`. It is also recommended to uninstall flash-attn via `pip uninstall flash-attn` when starting out.
 
-Once the environment is active, proceed into the openfold/openfold/resources directory and run the following code: 
+Once the base environment is active, proceed into the `openfold/openfold/resources directory` and run the following code: 
 
 `wget https://git.scicore.unibas.ch/schwede/openstructure/-/raw/7102c63615b64735c4941278d92b554ec94415f8/modules/mol/alg/src/stereo_chemical_props.txt`
 
-Once this is done, proceed back to the root of the cloned openfold repository and replace the setup.py provided with either of the openfold_setup_12.X.py files found in the IDPForge/dockerfiles directory corresponding to the GPU being used. The 12.1 version works for Pascal (sm_60) to Ampere (sm_80) GPUs while the 12.8 version extends this to Blackwell (sm_120) GPUs. Rename it as setup.py within the openfold repository and install it via `pip install -e .`. This makes the environment fully ready for use.
+Once this is done, proceed back to the root of the cloned openfold repository and replace the `setup.py` provided with either of the `openfold_setup_12.X.py` files found in the IDPForge/dockerfiles directory corresponding to cuda version chosen earlier. Rename it as setup.py within the openfold repository and install it via `pip install -e .`. This makes the environment fully ready for use.
 
 ESM2 utilities are refactored into this repo for network modules and exploring the effects of ESM embedding on IDP modeling. Alternatively, it can be installed from their github https://github.com/facebookresearch/esm.git, or via pip install `pip install fair-esm`.
 
