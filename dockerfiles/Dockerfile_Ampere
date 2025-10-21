@@ -1,7 +1,4 @@
-# NOTE: RUN IN IDPForge
-
-
-# Start from CUDA 12.1, which is a more established toolkit version
+# Start from CUDA 12.1
 FROM nvidia/cuda:12.1.0-devel-ubuntu22.04
 
 # Add metadata for the image.

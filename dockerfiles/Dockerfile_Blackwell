@@ -1,7 +1,4 @@
-# NOTE: RUN THIS IN "IDPForge"
-
-
-# Start from CUDA 12.8 so that its guaranteed
+# Start from CUDA 12.8
 FROM nvidia/cuda:12.8.0-devel-ubuntu22.04
 
 # Add metadata for the image. 
