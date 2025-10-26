@@ -6,7 +6,7 @@
 #
 # 3 lines involved for changing the torch and cuda versions are 
 # marked with comments on the side. Choose either the Default
-# or Alternative for all 3 lines. 
+# or Alternative for all 4 lines. 
 #
 # Default: Pascal (sm_60) to Ampere (sm_80). 
 # Recommended for HPC use.
@@ -20,7 +20,7 @@ channels:
   - conda-forge
   - bioconda
   - pytorch
-  - nvidia 
+  - nvidia
 dependencies:
   # --- Core Build & Python ---
   - gcc=12.4
@@ -33,6 +33,7 @@ dependencies:
   # --- CUDA Toolkit ---
   # Provides the 'nvcc' compiler. Must match the PyTorch build.
   - nvidia::cuda-toolkit=12.1 # Default: 12.1 || Alternative: 12.8
+  - conda-forge::cuda-version=12.1 # Default: 12.1 || Alternative: 12.8
 
   # --- Scientific & MD Libraries ---
   - openmm
