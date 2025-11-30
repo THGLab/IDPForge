@@ -4,7 +4,7 @@
 # This environment provides all dependencies to run the IDPForge 
 # software stack. 
 #
-# 3 lines involved for changing the torch and cuda versions are 
+# 4 lines involved for changing the torch and cuda versions are 
 # marked with comments on the side. Choose either the Default
 # or Alternative for all 4 lines. 
 #
@@ -15,7 +15,7 @@
 # Recommended for GPUs released on or after 2024. 
 # -----------------------------------------------------------------
 
-name: idpforge
+name: IDPForge
 channels:
   - conda-forge
   - bioconda
@@ -32,8 +32,8 @@ dependencies:
 
   # --- CUDA Toolkit ---
   # Provides the 'nvcc' compiler. Must match the PyTorch build.
-  - nvidia::cuda-toolkit=12.1 # Default: 12.1 || Alternative: 12.8
-  - conda-forge::cuda-version=12.1 # Default: 12.1 || Alternative: 12.8
+  - nvidia::cuda-toolkit=12.8 # Default: 12.1 || Alternative: 12.8
+  - conda-forge::cuda-version=12.8 # Default: 12.1 || Alternative: 12.8
 
   # --- Scientific & MD Libraries ---
   - openmm
@@ -48,9 +48,9 @@ dependencies:
   - bioconda::hmmer
   - bioconda::hhsuite
   - bioconda::kalign2
+  - pdb-tools
 
   # --- ML & Utility Libraries ---
-  - pytorch-lightning
   - PyYAML
   - requests
   - tqdm
@@ -65,12 +65,13 @@ dependencies:
   # --- PIP Dependencies ---
   - pip:
       # This index provides PyTorch builds compiled against the chosen cuda version.
-      - --extra-index-url https://download.pytorch.org/whl/cu121 # Default: cu121 || Alternative: cu128
+      - --extra-index-url https://download.pytorch.org/whl/cu128 # Default: cu121 || Alternative: cu128
       
       # Specific PyTorch build for the chosen cuda version.
-      - torch==2.5.1 # Default: 2.5.1 || Alternative: 2.7.1
+      - torch==2.7.1 # Default: 2.5.1 || Alternative: 2.7.1
       
       # Other core ML dependencies
+      - pytorch-lightning
       - deepspeed==0.14.5
       - dm-tree==0.1.6
     

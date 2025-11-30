@@ -9,26 +9,27 @@ RUN apt-get update && apt-get install -y \
     wget \
     git \
     libxml2 \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Set up miniconda
+# Set up miniforge
 ENV CONDA_DIR="/opt/conda"
-RUN wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda.sh && \
-    /bin/bash ~/miniconda.sh -b -p $CONDA_DIR && \
-    rm ~/miniconda.sh
+RUN wget --quiet https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O ~/miniforge.sh && \
+    /bin/bash ~/miniforge.sh -b -p $CONDA_DIR && \
+    rm ~/miniforge.sh
 ENV PATH="$CONDA_DIR/bin:$PATH"
 
-# Auto-accept tos
-RUN conda tos accept
-
-# Install the rest of the dependencies using env.yml
+# Copy env.yml and create the conda environment
 COPY ./dockerfiles/env.yml /opt/idpforge/env.yml
-RUN conda install -n base mamba -c conda-forge && \
-    conda env update -n base --file /opt/idpforge/env.yml --solver=libmamba && \
+RUN mamba env create -f /opt/idpforge/env.yml && \
     conda clean --all
+ENV PATH="/opt/conda/envs/IDPForge/bin:$PATH"
 
 # Install PyTorch 2.7.1 using the specific CUDA 12.8 wheel
 RUN pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu128
+
+# Install DeepSpeed
+RUN pip install deepspeed==0.14.5
 
 # Install/upgrade essential Python build tools before compiling OpenFold from source
 RUN pip install --upgrade pip setuptools wheel
@@ -41,7 +42,7 @@ COPY ./dockerfiles/openfold_setup_12.8.py /opt/openfold/setup.py
 RUN wget -q -P /opt/openfold/openfold/resources \
     https://git.scicore.unibas.ch/schwede/openstructure/-/raw/7102c63615b64735c4941278d92b554ec94415f8/modules/mol/alg/src/stereo_chemical_props.txt && \
     cd /opt/openfold && \
-    pip install .
+    pip install --no-build-isolation .
 
 # Copy the main application code and set the working directory. 
 COPY . /app

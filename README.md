@@ -6,13 +6,13 @@ A transformer protein language diffusion model to create all-atom IDP ensembles 
 
 To get started, both this and the openfold repository must be cloned in the same directory via the `git clone` command. Following that, the working conda environment can be established in two ways.
 
-The base environment can be built manually via the `env_manual.yml` file in the repo. The default file is set to install `torch==2.5.1 and cuda==12.1` for earlier GPUs (sm_60 - sm_80). Optionally, this may be changed to install `torch==2.7.1 and cuda==12.8` for later generation GPUs (sm_60 - sm_120). Refer to the comments in the file for modification instructions. 
+The base environment can be built manually via the `environment.yml` file in the repo. The default file is set to install `torch==2.5.1 and cuda==12.1` for earlier GPUs (sm_60 - sm_80). Optionally, this may be changed to install `torch==2.7.1 and cuda==12.8` for later generation GPUs (sm_60 - sm_120). Refer to the comments in the file for modification instructions. 
 
-Once the `env_manual.yml` file is set, the base environment can be created using the `conda env create -f env_manual.yml` and `pip install -e .` commands. This repo also requires `openfold` utilities, please refer to https://openfold.readthedocs.io/en/latest/Installation.html for installation instructions. The dependencies largely overlap with ones required by openfold. 
+Once the `environment.yml` file is set, the base environment can be created using the `conda env create -f environment.yml` and `pip install -e .` commands. This repo also requires `openfold` utilities, please refer to https://openfold.readthedocs.io/en/latest/Installation.html for installation instructions. The dependencies largely overlap with ones required by openfold. 
 
-If you have issues installing from yml file, it is recommended to follow the installation by openfold, and then activate the environment and install other dependencies via `conda install einops mdtraj -c conda-forge`. It is also recommended to uninstall flash-attn via `pip uninstall flash-attn` when starting out.
+If you have issues setting up the base environment from the yml file, or if you are setting IDPForge up for use on an HPC cluster, it is recommended to follow the installation by openfold, and then activate the environment and install other dependencies via `conda install einops mdtraj -c conda-forge`. It is also recommended to uninstall flash-attn via `pip uninstall flash-attn` when starting out if this installation pathway is chosen.
 
-Once the base environment is active, proceed into the `openfold/openfold/resources directory` and run the following code: 
+Once the base environment is active, proceed into the `openfold/openfold/resources` directory and run the following code: 
 
 `wget https://git.scicore.unibas.ch/schwede/openstructure/-/raw/7102c63615b64735c4941278d92b554ec94415f8/modules/mol/alg/src/stereo_chemical_props.txt`
 
@@ -25,7 +25,7 @@ Optional: `pip install flash-attn==2.3` to speed up attention calculation.
 ### Using Docker
 IDPForge can also be built as a docker container using either of the included dockerfiles (Blackwell or Ampere). Blackwell runs on CUDA12.8 and Ampere runs on CUDA12.1. Models weights and an example training data and other inference input files can be downloaded from [Figshare](https://doi.org/10.6084/m9.figshare.28414937). Optionally, the files may be merged before the creation of the image. This will ensure the image contains the merged files, removing the need for additional /weights and /data mounting.
 
-To build the image, run the following command from the root of this repository:
+To build the image, run the following command from the root of this repository choosing either Blackwell or Ampere based on preference:
 ```bash
 docker build -f dockerfiles/Dockerfile_[Blackwell/Ampere] -t idpforge:latest .
 ```

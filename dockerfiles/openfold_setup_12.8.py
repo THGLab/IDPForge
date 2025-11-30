@@ -53,11 +53,11 @@ def get_cuda_bare_metal_version(cuda_dir):
         return raw_output, bare_metal_major, bare_metal_minor
 
 compute_capabilities = set([
-    (6, 1), # Pascal
-    (7, 0), # Volta
-    (8, 0), # Ampere (A40/A100)
-    (9, 0), # Hopper/Ada
-    (12, 0),# Blackwell
+    (6, 1),  # Pascal
+    (7, 0),  # Volta
+    (8, 0),  # Ampere (A40/A100)
+    (9, 0),  # Hopper/Ada
+    (12, 0), # Blackwell
 ])
 
 cc_flag = []
