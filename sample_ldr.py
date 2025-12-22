@@ -34,7 +34,8 @@ def combine_sec(fold_ss, idr_ss, mask):
     return ss
 
 def main(ckpt_path, fold_template, output_dir, sample_cfg,
-        batch_size=32, nsample=200, attn_chunk_size=None, device="cpu"):
+        batch_size=32, nsample=200, attn_chunk_size=None, 
+        device="cpu", ss_db_path=None):
 
     settings = yaml.safe_load(open(sample_cfg, "r"))
     diffuser = Diffuser(settings["diffuse"]["n_tsteps"],
@@ -64,17 +65,34 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
     
     fold_data = np.load(fold_template)
     sequence = str(fold_data["seq"])
-    if settings["sec_path"] is None:
-        with open(settings["data_path"], "rb") as f:
+    
+    if ss_db_path is not None and os.path.exists(ss_db_path):
+        with open(ss_db_path, "rb") as f:
+            pkl = pickle.load(f)
+        if isinstance(pkl, (tuple, list)):
+            SEC_database = pd.DataFrame({"sequence": pkl[1], "sec": pkl[0]})
+        else:
+            SEC_database = pd.DataFrame(pkl)
+            
+        s1 = fetch_sec_from_seq(sequence, nsample*2, SEC_database)
+        del SEC_database
+
+    elif settings["sec_path"] is None:
+        dpath = settings.get("data_path", "data/example_data.pkl")
+        if not os.path.exists(dpath):
+            print(f"[!] Warning: Data path '{dpath}' not found.")
+            
+        with open(dpath, "rb") as f:
             pkl = pickle.load(f)
         SEC_database = pd.DataFrame({"sequence": pkl[1], "sec": pkl[0]})
         s1 = fetch_sec_from_seq(sequence, nsample*2, SEC_database)
         del SEC_database
+
     else:
         with open(settings["sec_path"], "r") as f:
-            ss = f.read().split("\n")
+            ss_lines = f.read().split("\n")
         seq_len = len(sequence)
-        s1 = [s[:seq_len] for s in ss if len(s) >= seq_len]
+        s1 = [s[:seq_len] for s in ss_lines if len(s) >= seq_len]
 
     ss = [combine_sec(str(fold_data["sec"]), d, fold_data["mask"]) for d in s1 if len(d)>sum(~fold_data["mask"])]
     crd_offset = fold_data.get("coord_offset", None)
@@ -82,8 +100,7 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
     relax_config = settings["relax"] 
     # use exclude_residues to apply restraints on folded structures
     relax_config["exclude_residues"] = np.where(fold_data["mask"])[0].tolist()
-    if not os.path.exists(output_dir):
-        os.mkdir(output_dir)
+    os.makedirs(output_dir, exist_ok=True)
     
     start = len(glob(output_dir+"/*_relaxed.pdb"))
     while start < nsample: 
@@ -122,9 +139,11 @@ if __name__ == "__main__":
     parser.add_argument('--nconf', default=100, type=int)
     parser.add_argument('--attention_chunk', default=None, type=int)
     parser.add_argument('--cuda', action="store_true")
+    parser.add_argument('--ss_db', default=None, type=str, help="Path to ss_database.pkl")
 
     args = parser.parse_args()
     main(args.ckpt_path, args.fold_input, args.out_dir, args.sample_cfg,
          args.batch, args.nconf, 
          attn_chunk_size=args.attention_chunk,
-         device="cuda" if args.cuda else "cpu")
+         device="cuda" if args.cuda else "cpu",
+         ss_db_path=args.ss_db)

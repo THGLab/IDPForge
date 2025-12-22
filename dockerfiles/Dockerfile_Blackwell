@@ -1,0 +1,49 @@
+# Start from CUDA 12.8
+FROM nvidia/cuda:12.8.0-devel-ubuntu22.04
+
+# Add metadata for the image. 
+LABEL org.opencontainers.image.authors="O Zhang"
+
+# Install essential system tools
+RUN apt-get update && apt-get install -y \
+    wget \
+    git \
+    libxml2 \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set up miniforge
+ENV CONDA_DIR="/opt/conda"
+RUN wget --quiet https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O ~/miniforge.sh && \
+    /bin/bash ~/miniforge.sh -b -p $CONDA_DIR && \
+    rm ~/miniforge.sh
+ENV PATH="$CONDA_DIR/bin:$PATH"
+
+# Copy env.yml and create the conda environment
+COPY ./dockerfiles/env.yml /opt/idpforge/env.yml
+RUN mamba env create -f /opt/idpforge/env.yml && \
+    conda clean --all
+ENV PATH="/opt/conda/envs/IDPForge/bin:$PATH"
+
+# Install PyTorch 2.7.1 using the specific CUDA 12.8 wheel
+RUN pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu128
+
+# Install DeepSpeed
+RUN pip install deepspeed==0.14.5
+
+# Install/upgrade essential Python build tools before compiling OpenFold from source
+RUN pip install --upgrade pip setuptools wheel
+
+# Clone OpenFold 
+RUN git clone https://github.com/aqlaboratory/openfold.git /opt/openfold
+
+# Move modified OpenFold setup.py into the newly cloned OpenFold directory and install
+COPY ./dockerfiles/openfold_setup_12.8.py /opt/openfold/setup.py
+RUN wget -q -P /opt/openfold/openfold/resources \
+    https://git.scicore.unibas.ch/schwede/openstructure/-/raw/7102c63615b64735c4941278d92b554ec94415f8/modules/mol/alg/src/stereo_chemical_props.txt && \
+    cd /opt/openfold && \
+    pip install --no-build-isolation .
+
+# Copy the main application code and set the working directory. 
+COPY . /app
+WORKDIR /app
