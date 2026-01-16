@@ -40,13 +40,13 @@ Augments the `AlphaFlex_database_Jul2024.json` file with additional information 
 
 Using this information, an `idr_type_summary.txt` file will be given that outlines the distribution of each protein into AlphaFlex defined categories.
 
-Usage: `python step_1_case_label.py`
+Usage: `python Step_1_case_label.py`
 
 ## Step 1B: Subset Label `(Output Directory: Step_1_Labeling)`
 
 Creates an `id_lists` directory containing a list of proteins in each category within a specified length subset. The lists will contain the IDs of each protein for subsequent processing.
 
-Usage: `python step_1B_subset_label.py`
+Usage: `python Step_1B_subset_label.py`
 
 ## Step 2: Template Creation `(Output Directory: Step_2_Templates)`
 
@@ -56,7 +56,7 @@ Tails and Loops have templates made by `mk_ldr_template.py` which keeps all regi
 
 Linkers have templates made by `mk_flex_template.py` which designates the 2 adjacent folded domains as separate objects and randomly shifts them within a certain distance of one another (mimicking the flexibility of non-interacting folded domains).
 
-Usage: `python step_2_mk_ldr_template.py`
+Usage: `python Step_2_mk_ldr_template.py`
 
 ## Step 3: IDR Conformer Generation `(Output Directory: Step_3_Raw_Conformers)`
 
@@ -64,7 +64,7 @@ Generates `X` conformers (Default `X` = 10) for each previously created template
 
 Generation of IDR conformers is done through the use of `sample_ldr.py`. 
 
-Usage: `python step_3_sample_conformer.py`.
+Usage: `python Step_3_sample_conformer.py`.
 
 ## Step 4: Stitching and Minimization `(Output Directory: Step_4_Final_Models)`
 

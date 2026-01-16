@@ -62,6 +62,8 @@ Then proceed into `openfold/` activate the OpenFold environment using the follow
 mamba env create -n openfold_env -f environment.yml
 ```
 
+> Note: This can also be run with `conda env create -n openfold_env -f environment.yml`
+
 Install other dependencies required by IDPForge using the following command:
 
 ``` bash
@@ -69,6 +71,16 @@ conda install einops mdtraj -c conda-forge
 ``` 
 
 It is also recommended to uninstall flash-attn via `pip uninstall flash-attn` when starting out if this installation pathway is chosen.
+
+Once flash-attn is uninstalled, proceed into `IDPForge/` and `openfold/` and install IDPForge and openfold as modules in the environment using the following commands:
+
+``` bash
+cd IDPForge/
+pip install -e .
+cd openfold/
+pip install -e .
+```
+> Note: If `pip install -e .` does not work, proceed with `pip install . --no-build-isolation` instead.
 
 This makes the environment fully ready for use.
 
