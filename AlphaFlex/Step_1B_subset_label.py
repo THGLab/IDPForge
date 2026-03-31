@@ -217,13 +217,15 @@ def main(args):
 
     # --- Output ---
     output_dir = os.path.join(args.output_root, "custom_subsets")
+    advanced_info_dir = os.path.join(args.output_root, "advanced_info")
     os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(advanced_info_dir, exist_ok=True)
 
     output_name = args.output_name
     list_path = os.path.join(output_dir, f"{output_name}.txt")
-    report_path = os.path.join(output_dir, f"{output_name}_report.txt")
-    hist_path = os.path.join(output_dir, f"{output_name}_histogram.png")
-    table_path = os.path.join(output_dir, f"{output_name}_histogram_table.txt")
+    report_path = os.path.join(advanced_info_dir, f"{output_name}_report.txt")
+    hist_path = os.path.join(advanced_info_dir, f"{output_name}_histogram.png")
+    table_path = os.path.join(advanced_info_dir, f"{output_name}_histogram_table.txt")
 
     # =========================================================================
     # OUTPUT 1: The ID List
