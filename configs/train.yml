@@ -43,6 +43,14 @@ training:
       sidechain_clamp: 8
     violation_cfg:
       start_epoch: 80
+validation:
+  loss_weights:
+    ca_drmsd: 0.1
+    violation: 0.0
+    dist: 0.05
+    rg_error: 1.0
+  compute_cb_dist: true
+  compute_rg: true
 diffuse:
   n_tsteps: 200
   n_tsteps_inf: 40

@@ -239,23 +239,34 @@ python train.py --model_config_path configs/train.yml
 
 ## Sampling
 
+Sampling loops through three phases until the target is met:
+
+1. **Generate + Relax**: Calls `sample_ldr.py` to produce diffusion conformers, which are immediately relaxed via AMBER minimization (relax config loaded from `configs/sample.yml`).
+2. **Repair**: Checks each relaxed structure for D-amino acids (chirality) and broken HIS ring bonds. Applies fixes and re-relaxes if any repairs were made.
+3. **Validate**: Runs unified validation checking chirality, bond integrity, clash score (adaptive smart threshold), and backbone topology (knot detection). Passing structures are renamed to `N_validated.pdb`.
+
+With that, sampling scripts are provided for wholly disordered and partially disordered proteins below.
+
 ### Single chain IDP/IDRs
 
 We provide a commandline interface to sample single chain IDP/IDRs.
 ```
-usage: sample_idp.py [-h] [--batch BATCH] [--nconf NCONF] [--cuda]
-                     ckpt_path output_dir sample_cfg
+usage: sample_idp.py seq ckpt_path output_dir sample_cfg
+[-h] [--batch BATCH] [--nconf NCONF] [--cuda] 
+[--verbose]$
 
 positional arguments:
   seq                protein sequence
   ckpt_path          path to model weights
   output_dir         directory to output pdbs
-  sample_cfg         path to a sampling configuration yaml file
+  sample_cfg         path to a sampling configuration    
+                     yaml file
 
 optional arguments:
   --batch BATCH      batch size 
   --nconf NCONF      number of conformers to sample
   --cuda             whether to use cuda or cpu
+  --verbose          show or hide debugging logs
 ```
 
 Example to generate 100 conformers for Sic1:
@@ -263,7 +274,7 @@ Example to generate 100 conformers for Sic1:
 ```bash
 mkdir test
 sequence="GSMTPSTPPRSRGTRYLAQPSGNTSSSALMQGQKTPQKPSQNLVPVTPSTTKSFKNAPLLAPPNSNMGMTSPFNGLTSPQRSPFPKSSVKRT"
-python sample_idp.py $sequence weights/mdl.ckpt test configs/sample.yml --nconf 100 --cuda 
+python sample_idp.py $sequence weights/mdl.ckpt test configs/sample.yml --nconf 100 --cuda --verbose
 ```
 
 Inference time experimental guidance can be activated by the potential flag in the `configs/sample.yml`. An example PREs experimental data file is also provided in `data/sic1_pre_exp.txt`.
@@ -278,7 +289,7 @@ docker run -it --rm --gpus all \
     -v "./weights/":/app/weights \
     -w /app \
     idpforge:latest \
-    python -u /app/sample_idp.py $sequence /app/weights/mdl.ckpt /app/output /app/configs/sample.yml --nconf 100 --cuda
+    python -u /app/sample_idp.py $sequence /app/weights/mdl.ckpt /app/output /app/configs/sample.yml --nconf 100 --cuda --verbose
 ```
 
 ### IDRs with folded domains
@@ -292,7 +303,7 @@ The provided model weights are not recommended for predicting multiple domains a
 Then, to generate an IDRs with folded domains ensemble, run
 ```bash
 mkdir P05231_build
-python sample_ldr.py weights/mdl.ckpt data/AF-P05231_ndr.npz P05231_build configs/sample.yml --nconf 100 --cuda
+python sample_ldr.py weights/mdl.ckpt data/AF-P05231_ndr.npz P05231_build configs/sample.yml --nconf 100 --cuda --verbose
 ```
 One can set the `attention_chunk` to manage memory usage for long sequences (Inference on long disordered sequences may be limited by training sequence length).
 
@@ -305,7 +316,7 @@ docker run -it --rm --gpus all \
     -v "./weights/":/app/weights \
     -w /app \
     idpforge:latest \
-    python -u /app/sample_ldr.py /app/weights/mdl.ckpt /app/data/AF-P05231_ndr.npz /app/output /app/configs/sample.yml --nconf 100 --cuda
+    python -u /app/sample_ldr.py /app/weights/mdl.ckpt /app/data/AF-P05231_ndr.npz /app/output /app/configs/sample.yml --nconf 100 --cuda --verbose
 ```
 
 ### Chemical shifts prediction and evaluating ensembles with X-EISD (optional)

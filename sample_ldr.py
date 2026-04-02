@@ -39,8 +39,8 @@ def combine_sec(fold_ss, idr_ss, mask):
     return ss
 
 def main(ckpt_path, fold_template, output_dir, sample_cfg,
-        batch_size=32, nsample=200, attn_chunk_size=None, 
-        device="cpu", ss_db_path=None, no_relax=False):
+        batch_size=32, nsample=200, attn_chunk_size=None,
+        device="cpu", ss_db_path=None, no_relax=False, verbose=False):
 
     # 1. Load Config
     print(f"[ldr] Loading Config: {sample_cfg}", flush=True)
@@ -110,7 +110,7 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
         relax_config = settings["relax"] 
         relax_config["exclude_residues"] = np.where(fold_data["mask"])[0].tolist()
         relax_opts = mlc.ConfigDict(relax_config)
-        search_pattern = "*_relaxed.pdb"
+        search_pattern = "*_validated.pdb"
 
     # Output Setup
     os.makedirs(output_dir, exist_ok=True)
@@ -166,12 +166,13 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
 
         output_to_pdb(outputs, relax=relax_opts,
                 save_path=abs_output_dir, counter=start_idx,
-                counter_cap=nsample, viol_mask=~fold_data["mask"])
+                counter_cap=nsample, viol_mask=~fold_data["mask"],
+                verbose=verbose)
 
         # Re-count actual files on disk (some conformers may be rejected by relaxation)
         current_count = count_done()
 
-    print("[ldr] Generation Complete.")
+    print(f"[ldr] Generation Complete. {current_count} validated conformers in {abs_output_dir}")
 
 if __name__ == "__main__":
     import argparse
@@ -186,14 +187,16 @@ if __name__ == "__main__":
     parser.add_argument('--cuda', action="store_true")
     parser.add_argument('--ss_db', default=None, type=str)
     parser.add_argument('--no_relax', action="store_true", help="Skip relaxation (outputs raw pdb)")
+    parser.add_argument('--verbose', action="store_true", help="Print structural validation details")
 
     args = parser.parse_args()
-    
+
     device = "cuda" if args.cuda and torch.cuda.is_available() else "cpu"
-    
+
     main(args.ckpt_path, args.fold_input, args.out_dir, args.sample_cfg,
-         args.batch, args.nconf, 
+         args.batch, args.nconf,
          attn_chunk_size=args.attention_chunk,
          device=device,
          ss_db_path=args.ss_db,
-         no_relax=args.no_relax)
+         no_relax=args.no_relax,
+         verbose=args.verbose)

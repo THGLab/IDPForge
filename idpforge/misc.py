@@ -4,6 +4,7 @@ Copyright (c) Meta Platforms, Inc. and affiliates.
 """
 
 import typing as T
+import time
 import torch
 import numpy as np
 import os
@@ -101,6 +102,7 @@ def output_to_pdb(
     save_path=None,
     counter=1,
     counter_cap=None,
+    verbose=False,
     **kwargs
 ):
     """
@@ -126,11 +128,11 @@ def output_to_pdb(
     written_files = []
     file_idx = counter
 
-    # Build set of indices that already have relaxed files (to skip gaps only)
+    # Build set of indices that already have validated files (to skip gaps only)
     existing_indices = set()
     if save_path is not None:
         from glob import glob as _glob
-        for f in _glob(os.path.join(save_path, "*_relaxed.pdb")):
+        for f in _glob(os.path.join(save_path, "*_validated.pdb")):
             base = os.path.basename(f).split("_")[0]
             if base.isdigit():
                 existing_indices.add(int(base))
@@ -175,24 +177,140 @@ def output_to_pdb(
 
         file_idx += 1
 
-    # If relaxation is requested, run it here
+    # If relaxation is requested, run it here with structural repair + validation
     if relax is not None:
+        from openmm.app import PDBFile as OMMPDBFile
         from idpforge.utils.relax import relax_protein
+        from idpforge.utils.structure_validation import (
+            validate_structure_post_relax, check_bond_integrity,
+        )
+        from idpforge.utils.structure_repair import (
+            repair_chirality, fix_histidine_naming,
+        )
+
+        _HIS_RESNAMES = {'HIS', 'HID', 'HIE', 'HIP'}
+        device_str = "cuda" if torch.cuda.is_available() else "cpu"
         relaxed_files = []
+        validate_attempt = 0
+        valid_count = 0
+
         for raw_path in written_files:
             stem = os.path.basename(raw_path).replace("_raw.pdb", "")
+            relaxed_path = os.path.join(save_path, stem + "_relaxed.pdb")
+            validate_attempt += 1
+
+            if verbose:
+                print("-" * 60, flush=True)
+                print(f"     [Batch Attempt {validate_attempt}] Conformer {stem}", flush=True)
+
+            # --- Initial relaxation ---
             relax_protein(
-                relax,
-                "cuda" if torch.cuda.is_available() else "cpu",
+                relax, device_str,
                 from_pdb_string(open(raw_path).read()),
-                save_path,
-                stem,
-                **kwargs
+                save_path, stem, **kwargs
             )
-            relaxed_files.append(os.path.join(save_path, stem + "_relaxed.pdb"))
-            # Clean up raw file after relaxation
             if os.path.isfile(raw_path):
                 os.remove(raw_path)
+
+            if not os.path.isfile(relaxed_path):
+                if verbose:
+                    print(f"       [RELAX] Relaxation failed, skipping.", flush=True)
+                continue
+
+            # --- Pre-validation: Structural Repair ---
+            needs_rerelax = False
+
+            # 1a. Bond integrity -> find broken HIS residues
+            try:
+                chk = OMMPDBFile(relaxed_path)
+                broken = check_bond_integrity(chk.topology, chk.positions)
+                his_resids = {b['resid'] for b in broken
+                              if b['resname'] in _HIS_RESNAMES
+                              or b.get('resname2', '') in _HIS_RESNAMES}
+            except Exception:
+                his_resids = set()
+
+            # 1b. Chirality repair
+            n_chiral = repair_chirality(relaxed_path)
+            if n_chiral > 0:
+                if verbose:
+                    print(f"       [REPAIR] Flipped {n_chiral} D-isomer(s)", flush=True)
+                needs_rerelax = True
+
+            # 1c. HIS naming fix
+            if his_resids:
+                n_his = fix_histidine_naming(relaxed_path, his_resids)
+                if n_his > 0:
+                    needs_rerelax = True
+
+            # --- Re-relax if repairs applied ---
+            if needs_rerelax:
+                if verbose:
+                    print(f"       [RE-RELAX] Re-relaxing after repairs...", flush=True)
+                repaired_prot = from_pdb_string(open(relaxed_path).read())
+                os.remove(relaxed_path)
+                relax_protein(
+                    relax, device_str, repaired_prot,
+                    save_path, stem, **kwargs
+                )
+                if not os.path.isfile(relaxed_path):
+                    if verbose:
+                        print(f"       [RE-RELAX] Failed, discarding.", flush=True)
+                    continue
+            elif verbose:
+                print(f"       [PRE-VALIDATION] All checks clean.", flush=True)
+
+            # --- Structural validation ---
+            t0 = time.perf_counter()
+            try:
+                chk = OMMPDBFile(relaxed_path)
+                is_valid, info = validate_structure_post_relax(
+                    chk.topology, chk.positions, pdb_path=relaxed_path,
+                    full_report=True
+                )
+            except Exception as e:
+                is_valid = False
+                info = {"reason": str(e), "chirality_pass": False,
+                        "bonds_pass": False, "clash_pass": False,
+                        "knot_pass": False}
+            elapsed = time.perf_counter() - t0
+
+            if verbose:
+                chiral_pass = info.get("chirality_pass", True)
+                bonds_pass = info.get("bonds_pass", True)
+                clash_pass = info.get("clash_pass", True)
+                knot_pass = info.get("knot_pass", True)
+                clash_count = info.get("num_clashes", "?")
+                clash_score = info.get("clash_score", 0.0)
+                n_broken = info.get("num_broken_bonds", 0)
+                knot_type = info.get("knot_type", "None")
+                threshold = 10.0
+
+                chiral_str = "PASS" if chiral_pass else "FAIL (D-Amino detected)"
+                bonds_str = "PASS" if bonds_pass else f"FAIL ({n_broken} broken)"
+                clash_str = "PASS" if clash_pass else "FAIL"
+                knot_str = "PASS" if knot_pass else f"FAIL ({knot_type})"
+
+                print(f"       [TIMING] Validation: {elapsed:.2f}s", flush=True)
+                print(f"       [POST-MIN CHECK] Validation Results", flush=True)
+                print(f"         - Chirality: {chiral_str}", flush=True)
+                print(f"         - Bonds:     {bonds_str}", flush=True)
+                print(f"         - Clashes:   {clash_count}  (Score: {clash_score:.2f} | Limit: {threshold:.1f})", flush=True)
+                print(f"         - Topology:  {knot_str}", flush=True)
+
+            if is_valid:
+                valid_count += 1
+                validated_path = relaxed_path.replace("_relaxed.pdb", "_validated.pdb")
+                os.rename(relaxed_path, validated_path)
+                if verbose:
+                    print(f"       [RESULT] SUCCESS!", flush=True)
+                relaxed_files.append(validated_path)
+            else:
+                reason = info.get("reason", "Unknown")
+                if verbose:
+                    print(f"       [RESULT] FAILED ({reason}) [Thresh: 10.00]", flush=True)
+                os.remove(relaxed_path)
+
         return relaxed_files
 
     return written_files

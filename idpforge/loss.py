@@ -12,6 +12,7 @@ from openfold.utils.loss import (
 )
 from openfold.data.data_transforms import pseudo_beta_fn
 from idpforge.utils.tensor_utils import get_dih, get_chi_mask, align_rigids
+from idpforge.utils.validation_metrics import rg_dist_per_group
 
 
 def alt_beta_fn(aatype, all_atom_positions):
@@ -174,5 +175,11 @@ def viol_loss(batch, return_metric=False):
     bond_clash_loss = violation_loss(violations, batch["atom14_atom_exists"]).mean()
     if return_metric:
         return bond_clash_loss, violations["total_per_residue_violations_mask"]
-    return bond_clash_loss 
+    return bond_clash_loss
+
+def rg_metrics(batch, true_rgs):
+    pred_crds = batch["positions"][-1][:, :, 1].detach().cpu().numpy()
+    sequence = batch["aatype"].detach().cpu().numpy()
+    mask = batch["atom14_atom_exists"][:, :, 1].detach().cpu().numpy()
+    return rg_dist_per_group(pred_crds, true_rgs.cpu().numpy(), sequence, mask)
 

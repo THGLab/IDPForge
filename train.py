@@ -59,24 +59,35 @@ def main(args):
     else:
         ckpt_path = args.resume_from_ckpt
 
-    mc = ModelCheckpoint(
-        monitor="val_ca_drmsd",
+    # Best 5 by validation loss
+    mc_best = ModelCheckpoint(
+        monitor="val_loss",
         every_n_epochs=1,
         auto_insert_metric_name=False,
-        save_top_k=3,
-        filename='{epoch}-{step}',
+        save_top_k=5,
+        mode="min",
+        filename='best-{epoch}-{step}',
         save_last=True,
     )
-    callbacks.append(mc)
+    callbacks.append(mc_best)
 
+    # Last 10 checkpoints
     mc_recent = ModelCheckpoint(
         every_n_epochs=1,
-        save_top_k=5,
+        save_top_k=10,
         monitor="step",
         mode="max",
         filename='latest-{epoch}-{step}',
-        )
+    )
     callbacks.append(mc_recent)
+
+    # Every 10 epochs
+    mc_periodic = ModelCheckpoint(
+        every_n_epochs=10,
+        save_top_k=-1,
+        filename='periodic-{epoch}-{step}',
+    )
+    callbacks.append(mc_periodic)
     
     if args.early_stopping:
         es = EarlyStoppingVerbose(

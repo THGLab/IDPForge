@@ -92,8 +92,8 @@ except ImportError:
 
 # --- Shared Utility Imports (same as Step 3) ---
 from utils.smart_scoring import get_smart_threshold
-from utils.pre_minimization import repair_chirality, fix_histidine_naming
-from utils.post_minimization import validate_structure_post_relax, check_bond_integrity
+from idpforge.utils.structure_repair import repair_chirality, fix_histidine_naming
+from idpforge.utils.structure_validation import validate_structure_post_relax, check_bond_integrity
 # ---
 
 # --- Stitch Utility Imports ---

@@ -49,7 +49,7 @@ def relax_protein(config, model_device, unrelaxed_protein,
     relaxed_output = os.path.join(output_dir, f'{pdb_name}_relaxed.pdb')
     with open(relaxed_output, 'w') as fp:
         fp.write(struct_str)
-    logger.info(f"saved at {relaxed_output} with relaxation time: {relaxation_time}")
+    print(f"       [RELAX] Saved {relaxed_output} ({relaxation_time:.2f}s)", flush=True)
     return 1
 
 

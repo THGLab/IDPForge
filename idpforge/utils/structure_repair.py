@@ -1,6 +1,8 @@
 """
-utils/pre_minimization.py
-Pre-minimization structural repairs for the IDPForge pipeline.
+idpforge/utils/structure_repair.py
+
+Pre-relaxation structural repairs for the IDPForge pipeline.
+
 Core functionality:
   - Detecting and repairing D-amino acid chirality flips.
   - Fixing scrambled histidine imidazole ring atom naming after AMBER relaxation.
@@ -9,6 +11,14 @@ Core functionality:
 import sys
 import numpy as np
 import numpy.linalg as LA
+
+# ============================================================
+# CONSTANTS
+# ============================================================
+
+# Atoms that are NOT reflected during chirality repair.
+# Everything else in the residue (CB, CG, CD, ..., hydrogens) is sidechain.
+_CHIRALITY_BACKBONE_ATOMS = {'N', 'H', 'CA', 'HA2', 'HA3', 'C', 'O', 'OXT'}
 
 # ============================================================
 # HISTIDINE RING NAMING CONSTANTS
@@ -24,8 +34,9 @@ _HIS_H_MAP = {'ND1': 'HD1', 'CE1': 'HE1', 'NE2': 'HE2', 'CD2': 'HD2'}
 
 def repair_chirality(pdb_path, verbose=False):
     """
-    Detects D-amino acids and reflects the CB atom across the N-CA-C plane to
-    restore L-isomer geometry using raw PDB line parsing.
+    Detects D-amino acids using OpenMM topology (consistent with check_chirality
+    in structure_validation.py) and reflects all sidechain atoms across the N-CA-C
+    plane to restore L-isomer geometry.
 
     Args:
         pdb_path (str): Path to the PDB file to process (modified in-place).
@@ -35,75 +46,101 @@ def repair_chirality(pdb_path, verbose=False):
         int: The total number of chiral centers repaired.
     """
     try:
+        from openmm.app import PDBFile as OMMPDBFile
+        from openmm import unit
+
+        # --- Detection: use OpenMM (same as check_chirality in structure_validation.py) ---
+        pdb = OMMPDBFile(pdb_path)
+        pos = np.asarray(pdb.positions.value_in_unit(unit.angstrom), dtype=np.float64)
+
+        flagged = []  # list of (chain_id, resid_str)
+        for res in pdb.topology.residues():
+            if res.name == 'GLY':
+                continue
+            a = {atom.name: atom.index for atom in res.atoms()
+                 if atom.name in ('N', 'CA', 'C', 'CB')}
+            if len(a) != 4:
+                continue
+            v_n  = pos[a['N']]  - pos[a['CA']]
+            v_c  = pos[a['C']]  - pos[a['CA']]
+            v_cb = pos[a['CB']] - pos[a['CA']]
+            vol = float(np.dot(np.cross(v_n, v_c), v_cb))
+            if vol < 1.0:
+                flagged.append((res.chain.id, res.id))
+
+        if not flagged:
+            return 0
+
+        # --- Repair: raw PDB line editing with full sidechain reflection ---
         with open(pdb_path, 'r') as f:
             lines = f.readlines()
 
-        # -- Collect backbone atoms per residue --
-        # Key: (chain_id, resid) -> {atom_name: (line_idx, xyz)}
-        residues = {}
+        flagged_set = set(flagged)
+        # Collect all atoms per flagged residue, split backbone vs sidechain
+        residue_atoms = {}  # (chain_id, resid) -> {'backbone': {name: xyz}, 'sidechain': [(line_idx, xyz)]}
+
         for i, line in enumerate(lines):
             if not line.startswith('ATOM'):
                 continue
-            atom_name = line[12:16].strip()
-            if atom_name not in ('N', 'CA', 'C', 'CB'):
-                continue
-            resname = line[17:20].strip()
-            if resname == 'GLY':
-                continue
             chain_id = line[21]
             resid = line[22:26].strip()
-            x = float(line[30:38])
-            y = float(line[38:46])
-            z = float(line[46:54])
             key = (chain_id, resid)
-            residues.setdefault(key, {'resname': resname}).setdefault('atoms', {})[atom_name] = (i, np.array([x, y, z]))
+            if key not in flagged_set:
+                continue
+
+            atom_name = line[12:16].strip()
+            x, y, z = float(line[30:38]), float(line[38:46]), float(line[46:54])
+            xyz = np.array([x, y, z])
+
+            entry = residue_atoms.setdefault(key, {'backbone': {}, 'sidechain': []})
+            if atom_name in _CHIRALITY_BACKBONE_ATOMS:
+                entry['backbone'][atom_name] = xyz
+            else:
+                entry['sidechain'].append((i, atom_name, xyz))
 
         repaired_count = 0
         modified = False
 
-        for (chain_id, resid), data in residues.items():
-            atoms = data.get('atoms', {})
-            if not all(k in atoms for k in ('N', 'CA', 'C', 'CB')):
+        for (chain_id, resid), data in residue_atoms.items():
+            bb = data['backbone']
+            if not all(k in bb for k in ('N', 'CA', 'C')):
+                continue
+            if not data['sidechain']:
                 continue
 
-            n  = atoms['N'][1]
-            ca = atoms['CA'][1]
-            c  = atoms['C'][1]
-            cb = atoms['CB'][1]
+            ca = bb['CA']
+            vec_n = bb['N'] - ca
+            vec_c = bb['C'] - ca
 
-            # Scalar triple product: Vol = (N-CA) . ((C-CA) x (CB-CA))
-            vec_n  = n - ca
-            vec_c  = c - ca
-            vec_cb = cb - ca
+            # Reflection plane normal (N-CA-C plane)
+            normal = np.cross(vec_n, vec_c)
+            norm_mag = LA.norm(normal)
+            if norm_mag < 1e-6:
+                continue
+            normal /= norm_mag
 
-            vol = np.dot(vec_n, np.cross(vec_c, vec_cb))
+            # Reflect every sidechain atom across the plane
+            for line_idx, atom_name, atom_pos in data['sidechain']:
+                vec_atom = atom_pos - ca
+                dist = np.dot(vec_atom, normal)
+                new_pos = ca + vec_atom - (2 * dist * normal)
 
-            if vol < 1.0:
-                # Reflect CB across the N-CA-C plane
-                normal = np.cross(vec_n, vec_c)
-                norm_mag = LA.norm(normal)
-                if norm_mag < 1e-6:
-                    continue
-                normal /= norm_mag
-
-                dist = np.dot(vec_cb, normal)
-                new_cb = ca + vec_cb - (2 * dist * normal)
-
-                # Rewrite CB coordinates in PDB columns 30-54
-                cb_line_idx = atoms['CB'][0]
-                line = lines[cb_line_idx]
-                lines[cb_line_idx] = (
+                line = lines[line_idx]
+                lines[line_idx] = (
                     line[:30]
-                    + f"{new_cb[0]:8.3f}{new_cb[1]:8.3f}{new_cb[2]:8.3f}"
+                    + f"{new_pos[0]:8.3f}{new_pos[1]:8.3f}{new_pos[2]:8.3f}"
                     + line[54:]
                 )
 
-                repaired_count += 1
-                modified = True
+            repaired_count += 1
+            modified = True
 
-                if verbose:
-                    print(f"       [REPAIR] Flipped D-isomer to L-form: "
-                          f"{data['resname']} {resid}", flush=True)
+            if verbose:
+                resname = lines[data['sidechain'][0][0]][17:20].strip()
+                n_sc = len(data['sidechain'])
+                print(f"       [REPAIR] Flipped D-isomer to L-form: "
+                      f"{resname} {resid} ({n_sc} sidechain atoms reflected)",
+                      flush=True)
 
         if modified:
             with open(pdb_path, 'w') as f:
@@ -112,7 +149,7 @@ def repair_chirality(pdb_path, verbose=False):
         return repaired_count
 
     except Exception as e:
-        print(f"       [ERROR] Chirality check failed: {e}", flush=True)
+        print(f"       [ERROR] Chirality repair failed: {e}", flush=True)
         return 0
 
 

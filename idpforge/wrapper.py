@@ -4,7 +4,7 @@ import ml_collections as mlc
 import os
 
 from idpforge.model import IDPForge
-from idpforge.loss import calc_loss, viol_loss
+from idpforge.loss import calc_loss, viol_loss, cb_dist_loss, rg_metrics
 from idpforge.misc import output_to_pdb
 from idpforge.utils.np_utils import coord_to_pdb
 from openfold.utils.exponential_moving_average import ExponentialMovingAverage
@@ -93,14 +93,32 @@ class IDPForgeWrapper(pl.LightningModule):
         output = self.model.recon(self.denoiser, batch["alpha_t"], batch["x_t"], in_batch) 
         output["sstype"] = batch["ss"]
 
+        val_cfg = self.config.get("validation", {})
+        loss_weights = val_cfg.get("loss_weights", {
+            "ca_drmsd": 1.0, "violation": 10.0, "dist": 0.0, "rg_error": 0.0
+        })
+
         loss_breakdown = {}
-        loss_breakdown["ca_drmsd"] = drmsd(output["positions"][-1][:, :, 1].detach(), 
+        loss_breakdown["ca_drmsd"] = drmsd(output["positions"][-1][:, :, 1].detach(),
             batch["coord"][:, :, 1], batch["mask"]).mean().item()
         v_l, v_mask = viol_loss(output, return_metric=True)
         loss_breakdown["violation"] = v_l.item()
-        
-        # Log it
-        loss_breakdown["loss"] = loss_breakdown["ca_drmsd"] + 10*loss_breakdown["violation"]
+
+        if val_cfg.get("compute_cb_dist", False):
+            loss_breakdown["dist"] = cb_dist_loss(
+                output, batch["coord"],
+                self.config['training']['loss']["dist"]["loop_clamp"]
+            ).item()
+
+        if val_cfg.get("compute_rg", False) and "rg" in batch:
+            loss_breakdown["rg_error"] = rg_metrics(output, batch["rg"])
+
+        # Configurable composite val_loss
+        loss_breakdown["loss"] = sum(
+            loss_weights.get(k, 0.0) * v
+            for k, v in loss_breakdown.items()
+            if k != "loss"
+        )
         self._log(loss_breakdown, train=False)
         output["violation_per_residue"] = v_mask
         if self.save_pdbs and (self.trainer.current_epoch + 1) % self.epoch_save_freq == 0 and (batch_idx + 1) % self.batch_save_freq == 0:

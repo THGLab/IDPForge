@@ -23,7 +23,7 @@ old_params = ["trunk.structure_module.ipa.linear_q_points.weight", "trunk.struct
 seed_everything(42)
 
 def main(sequence, ckpt_path, output_dir, sample_cfg,
-        batch_size=32, nsample=200, device="cpu", no_relax=False):
+        batch_size=32, nsample=200, device="cpu", no_relax=False, verbose=False):
 
     # 1. Load Config
     print(f"[idp] Loading Config: {sample_cfg}", flush=True)
@@ -105,7 +105,7 @@ def main(sequence, ckpt_path, output_dir, sample_cfg,
         search_pattern = "*_raw.pdb"
     else:
         relax_opts = mlc.ConfigDict(settings["relax"])
-        search_pattern = "*_relaxed.pdb"
+        search_pattern = "*_validated.pdb"
 
     # 8. Output Setup
     os.makedirs(output_dir, exist_ok=True)
@@ -148,12 +148,13 @@ def main(sequence, ckpt_path, output_dir, sample_cfg,
                     potential_cfgs=potential_cfg)
 
         output_to_pdb(outputs, relax=relax_opts,
-                save_path=abs_output_dir, counter=start_idx, counter_cap=nsample)
+                save_path=abs_output_dir, counter=start_idx, counter_cap=nsample,
+                verbose=verbose)
 
         # Re-count actual files on disk (some conformers may be rejected by relaxation)
         current_count = count_done()
 
-    print(f"[idp] Generation Complete. {current_count} conformers in {abs_output_dir}")
+    print(f"[idp] Generation Complete. {current_count} validated conformers in {abs_output_dir}")
 
 if __name__ == "__main__":
     import argparse
@@ -166,8 +167,9 @@ if __name__ == "__main__":
     parser.add_argument('--nconf', default=100, type=int)
     parser.add_argument('--cuda', action="store_true")
     parser.add_argument('--no_relax', action="store_true", help="Skip relaxation (outputs raw pdb)")
+    parser.add_argument('--verbose', action="store_true", help="Print structural validation details")
 
     args = parser.parse_args()
     device = "cuda" if args.cuda and torch.cuda.is_available() else "cpu"
     main(args.seq, args.ckpt_path, args.output_dir, args.sample_cfg,
-         args.batch, args.nconf, device, no_relax=args.no_relax)
+         args.batch, args.nconf, device, no_relax=args.no_relax, verbose=args.verbose)

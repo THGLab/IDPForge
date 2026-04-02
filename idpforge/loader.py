@@ -42,17 +42,20 @@ class BatchCollator:
         if 'T' in batch[0]:
             t_list = torch.tensor(_batch_dict['T'])
             collated_data['T'] = t_list.unsqueeze(-1).repeat(1, ss.shape[1])
-            
+        if "rg" in batch[0]:
+            collated_data["rg"] = torch.tensor(_batch_dict["rg"], dtype=torch.float)
+
         return collated_data
     
 
 class DiffDataset(Dataset):
-    def __init__(self, diffuser, ss, sequence, coords, *extra, train=False):
+    def __init__(self, diffuser, ss, sequence, coords, rgs=None, *extra, train=False):
         super(DiffDataset).__init__()
         self.template_diffuser = diffuser
         self.sequence = sequence
         self.ss = ss
         self.c = coords
+        self.rg = rgs
         self.tstep = diffuser.T
         self.training = train
     
@@ -94,6 +97,8 @@ class DiffDataset(Dataset):
                 }
         if self.training:
             batch.update({"T": T - 1, "x_t+1": x_t1, "alpha_t+1": tor_t1})
+        elif self.rg is not None:
+            batch["rg"] = self.rg[idx]
         return batch
     
 

@@ -1,11 +1,13 @@
 """
-utils/post_minimization.py
+idpforge/utils/structure_validation.py
 
-Robust post-minimization structural validation.
+Structural validation utilities for protein conformers.
 
 Features:
-- CLASHES: Fast Backbone-Backbone check (cKDTree).
-- TOPOLOGY: Hybrid Protocol (Clean Topoly Native Implementation).
+- CHIRALITY: Checks for D-amino acids using scalar triple product of N, CA, C, CB.
+- BONDS: Verifies all covalent bonds are intact (distance < 2.2 Å).
+- CLASHES: Backbone-Backbone clash detection with IDR-aware filtering.
+- TOPOLOGY: Hybrid Protocol (Topoly Native Implementation).
     1. Alexander Gatekeeper (Probabilistic):
        - Uses native 'tries=100' argument.
        - Threshold 0.65 prevents "borderline" knots from slipping through.
@@ -57,94 +59,94 @@ def check_chirality(topology, positions):
     issues = []
     for res in topology.residues():
         if res.name == 'GLY': continue
-        
+
         # We need N, CA, C, CB to check chirality volume
         a = {atom.name: atom.index for atom in res.atoms() if atom.name in ('N', 'CA', 'C', 'CB')}
         if len(a) == 4:
             v_n = pos[a['N']] - pos[a['CA']]
             v_c = pos[a['C']] - pos[a['CA']]
             v_cb = pos[a['CB']] - pos[a['CA']]
-            
+
             # Scalar triple product
             vol = float(np.dot(np.cross(v_n, v_c), v_cb))
-            
+
             # Volume < 0 indicates D-enantiomer (should be L)
             if vol < 1.0:
                 stereo = "D" if vol < 0 else "Planar/Distorted"
                 issues.append({"residue": f"{res.name}{res.id}", "volume": vol, "stereo": stereo})
     return issues
 
-def check_bond_integrity(topology, positions, threshold=2.2): 
-    """ 
-    Checks for broken covalent bonds (> threshold Angstroms). 
+def check_bond_integrity(topology, positions, threshold=2.2):
+    """
+    Checks for broken covalent bonds (> threshold Angstroms).
     Naive implementation relying entirely on OpenMM's inferred topology.
-    """ 
-    positions = _get_coords_64(topology, positions) 
-    broken = [] 
-    for bond in topology.bonds(): 
-        i, j = bond.atom1.index, bond.atom2.index 
-        d = float(np.linalg.norm(positions[i] - positions[j])) 
-        if d > threshold: 
-            print(f"[BOND ERROR] Broken bond: {bond.atom1.residue.name}{bond.atom1.residue.id}({bond.atom1.name}) - {bond.atom2.residue.name}{bond.atom2.residue.id}({bond.atom2.name}) d={d:.2f} Å", flush=True)
-            broken.append({ 
-                "resname": bond.atom1.residue.name, 
-                "resid": bond.atom1.residue.id, 
+    """
+    positions = _get_coords_64(topology, positions)
+    broken = []
+    for bond in topology.bonds():
+        i, j = bond.atom1.index, bond.atom2.index
+        d = float(np.linalg.norm(positions[i] - positions[j]))
+        if d > threshold:
+            print(f"         [BOND ERROR] {bond.atom1.residue.name}{bond.atom1.residue.id}({bond.atom1.name}) - {bond.atom2.residue.name}{bond.atom2.residue.id}({bond.atom2.name}) d={d:.2f} Å", flush=True)
+            broken.append({
+                "resname": bond.atom1.residue.name,
+                "resid": bond.atom1.residue.id,
                 "atom1": bond.atom1.name,  # Added for debugging
                 "atom2": bond.atom2.name,  # Added for debugging
-                "distance": d, 
-                "resname2": bond.atom2.residue.name, 
+                "distance": d,
+                "resname2": bond.atom2.residue.name,
                 "resid2": bond.atom2.residue.id
-            }) 
+            })
     return broken
 
 def check_clashes_detailed(topology, positions, overlap_cutoff=0.4, idr_start=None, idr_end=None):
     """
     Fast Backbone-Backbone Clash Check (cKDTree).
-    
+
     FILTERS:
     1. Atoms: N, CA, C (Skeleton only, O/OXT removed).
-    2. Exclusions: 
+    2. Exclusions:
        - Bonded (i to i+1).
        - Folded-Folded interactions (Ignored if idr_start/end provided).
-       
+
     Returns: (score, count, details)
     """
     # 1. Minimal Backbone (Skeleton Only)
     BACKBONE_NAMES = {'N', 'CA', 'C'}
-    
+
     atoms = list(topology.atoms())
-    
+
     # Storage arrays
     bb_indices = []
     bb_radii = []
     bb_res_ids = []
     bb_chain_ids = []
-    
+
     # Pre-fetch radii (using simple dictionary lookup)
     # Note: Carbon (C) radius ~1.70A, Nitrogen (N) ~1.55A
     def get_r(elem): return VDW_RADII.get(elem, 1.70)
-    
+
     for i, atom in enumerate(atoms):
         if atom.name in BACKBONE_NAMES:
             bb_indices.append(i)
             bb_radii.append(get_r(atom.element.symbol))
             bb_res_ids.append(int(atom.residue.id))
             bb_chain_ids.append(atom.residue.chain.index)
-            
+
     if not bb_indices: return 0.0, 0, []
-    
+
     # 2. Build Tree
     all_coords = _get_coords_64(topology, positions)
     coords = all_coords[bb_indices]
     radii = np.array(bb_radii)
     res_ids = np.array(bb_res_ids)
     chain_ids = np.array(bb_chain_ids)
-    
+
     tree = cKDTree(coords)
-    pairs = tree.query_pairs(r=4.0) 
-    
+    pairs = tree.query_pairs(r=4.0)
+
     clash_count = 0
-    
+
     # 3. Check Pairs with IDR Logic
     for i, j in pairs:
         # A. Chain/Bond Exclusion
@@ -160,7 +162,7 @@ def check_clashes_detailed(topology, positions, overlap_cutoff=0.4, idr_start=No
             is_i_idr = (idr_start <= res_ids[i] <= idr_end)
             # Check if Atom J is in IDR
             is_j_idr = (idr_start <= res_ids[j] <= idr_end)
-            
+
             # If NEITHER is in the IDR (meaning both are folded), SKIP.
             if not is_i_idr and not is_j_idr:
                 continue
@@ -168,11 +170,11 @@ def check_clashes_detailed(topology, positions, overlap_cutoff=0.4, idr_start=No
         # C. Overlap Calculation
         dist = np.linalg.norm(coords[i] - coords[j])
         overlap = (radii[i] + radii[j]) - dist
-        
+
         # We are counting ERRORS, so Overlap >= cutoff is BAD.
         if overlap >= overlap_cutoff:
             clash_count += 1
-            
+
     score = (clash_count / len(bb_indices)) * 1000.0
     return score, clash_count, []
 
@@ -191,14 +193,14 @@ def classify_global_topology_alphaknot(topology, positions, VERBOSE=False):
     """
     import topoly as tp
     from topoly.params import Closure
-    
+
     # Prepare Coordinates (CA only)
     pos = _get_coords_64(topology, positions)
     ca_atoms = sorted([a for a in topology.atoms() if a.name == "CA"], key=lambda x: int(x.residue.id))
     if not ca_atoms: return {"label": "None", "reason": "NoCA"}
-    
+
     coords_list = pos[[a.index for a in ca_atoms]].tolist()
-    
+
     # ----------------------------------------
     # Phase 1: Alexander Probabilistic Gatekeeper
     # ----------------------------------------
@@ -216,13 +218,13 @@ def classify_global_topology_alphaknot(topology, positions, VERBOSE=False):
         for k, v in alex_results.items():
             if str(k) in ["0_1", "Unknot", "0", "1"]:
                 alex_p_unknot += v
-    
+
     alex_p_knot = 1.0 - alex_p_unknot
 
     # ----------------------------------------
     # Phase 2: Decision Logic
     # ----------------------------------------
-    
+
     # CASE A: High Confidence Unknot
     if alex_p_unknot >= ALPHAKNOT_P_UNKNOT_MAX:
         return {
@@ -238,32 +240,32 @@ def classify_global_topology_alphaknot(topology, positions, VERBOSE=False):
     try:
         # No 'tries' needed for deterministic closure
         poly = tp.homfly(coords_list, closure=Closure.MASS_CENTER)
-        
+
         if poly is None:
             return {"label": "Error", "reason": "HOMFLY_Failed", "Alexander_Ran": True, "HOMFLY_Ran": True}
 
         # Check for Unknot in HOMFLY output
         is_unknot_homfly = False
-        if isinstance(poly, str) and poly in ["0_1", "Unknot", "0", "1"]: 
+        if isinstance(poly, str) and poly in ["0_1", "Unknot", "0", "1"]:
             is_unknot_homfly = True
         elif isinstance(poly, dict):
             # Should not happen with deterministic closure, but safety first
             is_unknot_homfly = "0_1" in poly or "Unknot" in poly
-        
+
         if is_unknot_homfly:
              return {
-                "label": "None", 
+                "label": "None",
                 "closure_polys": [f"Alex_P={alex_p_knot:.2f}|HOMFLY={str(poly)}"],
-                "Alexander_Ran": True, 
-                "HOMFLY_Ran": True, 
+                "Alexander_Ran": True,
+                "HOMFLY_Ran": True,
                 "reason": "HOMFLY_Unknot"
             }
         else:
              return {
-                "label": "Knot", 
+                "label": "Knot",
                 "closure_polys": [f"Alex_P={alex_p_knot:.2f}|HOMFLY={str(poly)}"],
-                "Alexander_Ran": True, 
-                "HOMFLY_Ran": True, 
+                "Alexander_Ran": True,
+                "HOMFLY_Ran": True,
                 "reason": f"HOMFLY_Knot({str(poly)})"
             }
 
@@ -279,7 +281,7 @@ def validate_structure_post_relax(
     full_report=False
 ):
     """
-    Main validation function called by audit_structures.py and Step_3.
+    Main validation function.
 
     Args:
         full_report: If True, runs ALL checks regardless of failures and
