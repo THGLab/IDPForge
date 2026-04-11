@@ -8,6 +8,7 @@ import time
 import numpy as np
 from openfold.np import residue_constants, protein
 from openfold.np.relax import relax
+from openmm import OpenMMException
 
 logging.basicConfig()
 logger = logging.getLogger(__file__)
@@ -31,10 +32,9 @@ def relax_protein(config, model_device, unrelaxed_protein,
 
     try:
         struct_str, _, viol = amber_relaxer.process(prot=unrelaxed_protein, cif_output=False)
-    except ValueError:
-        # likely due to a CYS protonation error
+    except (ValueError, OpenMMException):
+        # ValueError: CYS protonation error; OpenMMException: NaN coords, etc.
         logger.info("Minimization failed...abort")
-        #raise
         return 0
     aatype = unrelaxed_protein.aatype
     if len(ring_AA.intersection({a for a, v in zip(aatype, viol) if bool(v)})) > 0:

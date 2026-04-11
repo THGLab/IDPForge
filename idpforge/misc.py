@@ -25,7 +25,47 @@ from idpforge.utils.definitions import (
     coil_types, coil_sample_probs,
 )
 from idpforge.utils.np_utils import calc_rg, assign_rama
-            
+
+
+# ============================================================
+# JUNCTION DISTANCE FILTER
+# ============================================================
+_JUNCTION_CA_THRESHOLD = 6.46  # CA-CA (~3.8 A) + 2x C-N peptide bond (1.33 A)
+
+
+def _check_junction_distances(atom_positions, viol_mask, threshold=_JUNCTION_CA_THRESHOLD):
+    """
+    Check CA-CA distances at IDR↔folded boundaries.
+
+    When sample_ldr.py generates IDR conformations with folded regions frozen
+    to template coordinates, the diffused IDR endpoints can land too far from
+    the adjacent folded residues.  This pre-relaxation filter rejects those
+    conformers early, saving wasted relaxation compute.
+
+    Args:
+        atom_positions: [L, 37, 3] atom37 coordinates (numpy).
+        viol_mask: [L] boolean array — True = IDR, False = folded.
+        threshold: Max allowed CA-CA distance in Angstroms (default 5.0).
+
+    Returns:
+        (passes, details):
+            passes — True if ALL boundary CA-CA distances are within threshold.
+            details — list of dicts with idr_res, fold_res, distance, pass.
+    """
+    CA_IDX = 1  # CA atom index in atom37 format
+    details = []
+    for i in range(len(viol_mask) - 1):
+        if viol_mask[i] != viol_mask[i + 1]:
+            ca_i = atom_positions[i, CA_IDX]
+            ca_j = atom_positions[i + 1, CA_IDX]
+            dist = float(np.linalg.norm(ca_i - ca_j))
+            idr_res = i if viol_mask[i] else i + 1
+            fold_res = i + 1 if viol_mask[i] else i
+            details.append({
+                "idr_res": idr_res, "fold_res": fold_res,
+                "distance": dist, "pass": dist <= threshold,
+            })
+    return all(d["pass"] for d in details), details
 
 
 def onehot_to_ss(tokens, mask):
@@ -128,6 +168,9 @@ def output_to_pdb(
     written_files = []
     file_idx = counter
 
+    # Junction distance filter: extract viol_mask (do NOT pop — relax_protein needs it)
+    viol_mask = kwargs.get("viol_mask", None)
+
     # Build set of indices that already have validated files (to skip gaps only)
     existing_indices = set()
     if save_path is not None:
@@ -153,6 +196,31 @@ def output_to_pdb(
         pred_pos = final_atom_positions[i]
         mask = final_atom_mask[i]
         resid = output["residue_index"][i] + 1  # preserve numbering
+
+        # --- NaN coordinate filter ---
+        if np.isnan(pred_pos).any():
+            if verbose:
+                print(f"       [NaN] Conformer {file_idx} has NaN coordinates, skipping.", flush=True)
+            continue
+
+        # --- Junction distance filter (pre-relaxation) ---
+        if viol_mask is not None:
+            junc_pass, junc_details = _check_junction_distances(pred_pos, viol_mask)
+            if not junc_pass:
+                if verbose:
+                    for d in junc_details:
+                        status = "OK" if d["pass"] else "FAIL"
+                        print(f"       [JUNCTION] res {d['idr_res']+1}(IDR) <-> "
+                              f"res {d['fold_res']+1}(fold): "
+                              f"CA-CA = {d['distance']:.2f} A  [{status}]", flush=True)
+                    print(f"       [JUNCTION] Conformer {file_idx} rejected "
+                          f"(boundary > {_JUNCTION_CA_THRESHOLD} A)", flush=True)
+                continue  # do NOT increment file_idx — next conformer reuses this slot
+            elif verbose:
+                for d in junc_details:
+                    print(f"       [JUNCTION] res {d['idr_res']+1}(IDR) <-> "
+                          f"res {d['fold_res']+1}(fold): "
+                          f"CA-CA = {d['distance']:.2f} A  [OK]", flush=True)
 
         # Build full atom37 protein object
         pred = OFProtein(
