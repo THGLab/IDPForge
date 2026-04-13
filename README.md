@@ -1,14 +1,14 @@
 # IDPForge (Intrinsically Disordered Protein, FOlded and disordered Region GEnerator)
 
-A transformer protein language diffusion model to create all-atom IDP ensembles and IDR disordered ensembles that maintains the folded domains.
+A transformer protein language diffusion model to create all-atom IDP ensembles and IDR disordered ensembles that maintain their folded domains.
 
 ## Getting started
 
 To get started, this repository must be cloned using the following command:
 
- ``` bash
- git clone https://github.com/THGLab/IDPForge.git
- ```
+```bash
+git clone https://github.com/THGLab/IDPForge.git
+```
 
 Following that, the working conda environment can be established in two ways.
 
@@ -16,63 +16,63 @@ Following that, the working conda environment can be established in two ways.
 
 First, navigate to the new `IDPForge` directory:
 
-``` bash
+```bash
 cd IDPForge
 ```
 
 The base environment can be built manually via the `environment.yml` file in the repo. To do this, run the following command:
 
-``` bash
+```bash
 conda env create -f environment.yml
 ```
 
 Once the environment is created, activate it.
 
-``` bash
+```bash
 conda activate IDPForge
 ```
 
 Then install IDPForge as a module in the environment.
 
-``` bash
+```bash
 pip install -e .
 ```
 
-> Note: The default file is set to install `torch==2.5.1 and cuda==12.1` for earlier GPUs (sm_60 - sm_80). Optionally, this may be changed to install `torch==2.7.1 and cuda==12.8` for later generation GPUs (sm_60 - sm_120). Refer to the comments in the file for modification instructions. 
+> Note: The default `environment.yml` file is set to install `torch==2.5.1 and cuda==12.1` for earlier GPUs (sm_60 - sm_80). Optionally, this may be changed to install `torch==2.7.1 and cuda==12.8` for later generation GPUs (sm_60 - sm_120). Refer to the comments in the file for modification instructions. 
 
 This repo also requires `OpenFold` utilities, so that repository must be cloned in the same directory as IDPForge. To do this, first navigate to the parent directory.
 
-``` bash
+```bash
 cd ../
 ```
 
 Then clone the OpenFold repository into the parent directory.
 
-``` bash 
+```bash 
 git clone https://github.com/aqlaboratory/openfold.git
 ```
 
 Once the repository is cloned, proceed into the resources of OpenFold.
 
-``` bash
+```bash
 cd openfold/openfold/resources
 ```
 
 In there, download the following file.  
 
-``` bash
+```bash
 wget https://git.scicore.unibas.ch/schwede/openstructure/-/raw/7102c63615b64735c4941278d92b554ec94415f8/modules/mol/alg/src/stereo_chemical_props.txt
 ```
 
 Once this is done, navigate back into the main OpenFold directory.
 
-``` bash
+```bash
 cd ../../
 ```
 
 The OpenFold setup must be replaced. To do this, first locate the 2 setup replacements provided with the IDPForge repository.
 
-``` bash
+```bash
 ls path/to/my/IDPForge/dockerfiles/openfold_setup_12*
 ```
 
@@ -82,15 +82,15 @@ ls path/to/my/IDPForge/dockerfiles/openfold_setup_12*
 
 Then copy `openfold_setup_12.1.py` into the OpenFold directory as the new `setup.py`.
 
-``` bash
+```bash
 cp path/to/my/IDPForge/dockerfiles/openfold_setup_12.1.py path/to/my/openfold/setup.py
 ```
 
-> Note: If the alternative installation was chosen in Step 3, copy the `openfold_setup_12.8.py` version instead.
+> Note: If the alternative installation was chosen during the setup of the IDPForge environment, copy the `openfold_setup_12.8.py` version instead.
 
 Finally, install OpenFold as a module in the environment.
 
-``` bash
+```bash
 pip install -e .
 ```
 
@@ -100,23 +100,23 @@ This makes the environment fully ready for use.
 
 If you have issues setting up the base environment from the yml file, or if you are setting IDPForge up for use on an HPC cluster, it is recommended to follow the installation by openfold. To do this, start by cloning both repositories in the same directory.
 
-``` bash
+```bash
 git clone https://github.com/THGLab/IDPForge.git
 ```
 
-``` bash
+```bash
 git clone https://github.com/aqlaboratory/openfold.git
 ```
 
 Then navigate into the OpenFold directory.
 
-``` bash
+```bash
 cd openfold/
 ``` 
 
 Create the OpenFold environment using the following command.
 
-``` bash
+```bash
 mamba env create -n openfold_env -f environment.yml
 ```
 > Note: This can also be run with `conda env create -n openfold_env -f environment.yml`
@@ -129,25 +129,25 @@ conda activate openfold_env
 
 Install other dependencies required by IDPForge using the following commands:
 
-``` bash
+```bash
 conda install einops mdtraj pdb-tools -c conda-forge
 ``` 
 
-``` bash
+```bash
 conda install mmseqs2 -c bioconda
 ``` 
 
-``` bash
+```bash
 pip install tensorboard topoly
 ``` 
 
 It is also recommended to uninstall flash-attn when starting out if this installation pathway is chosen.
 
-``` bash
+```bash
 pip uninstall flash-attn
 ```
 
-Once flash-attn is uninstalled, navigate into the resources of Openfold.
+Once flash-attn is uninstalled, navigate into the resources of OpenFold.
 
 ```bash
 cd openfold/resources
@@ -155,7 +155,7 @@ cd openfold/resources
 
 In there, download the following file.  
 
-``` bash
+```bash
 wget https://git.scicore.unibas.ch/schwede/openstructure/-/raw/7102c63615b64735c4941278d92b554ec94415f8/modules/mol/alg/src/stereo_chemical_props.txt
 ```
 
@@ -167,20 +167,20 @@ cd ../../
 
 Install OpenFold as a module in the environment.
 
-``` bash
+```bash
 pip install -e .
 ```
 > Note: If `pip install -e .` does not work, proceed with `pip install . --no-build-isolation` instead.
 
 Navigate to the IDPForge directory.
 
-``` bash
+```bash
 cd ../IDPForge
 ```
 
 Install IDPForge as a module.
 
-``` bash
+```bash
 pip install -e .
 ```
 > Note: If `pip install -e .` does not work, proceed with `pip install . --no-build-isolation` instead.
@@ -191,13 +191,13 @@ This makes the environment fully ready for use.
 
 ## Downloading model weights and other files
 
-Models weights, example training data, and other inference input files can be downloaded from [Figshare](https://doi.org/10.6084/m9.figshare.28414937). 
+Model weights, example training data, and other inference input files can be downloaded from [Figshare](https://doi.org/10.6084/m9.figshare.28414937). 
 
 It is recommended to copy the `weights/` directory directly into the IDPForge repository as `IDPForge/weights/`. Similarly, the contents of `data/` can be copied into the given `IDPForge/data/` directory.
 
 ## Notes on ESM2 and Attention
 
-ESM2 utilities are refactored into this repo for network modules and exploring the effects of ESM embedding on IDP modeling. Alternatively, it can be installed from their github https://github.com/facebookresearch/esm.git, or via pip install `pip install fair-esm`.
+ESM2 utilities are refactored into this repo for network modules and exploring the effects of ESM embedding on IDP modeling. Alternatively, it can be installed from their GitHub https://github.com/facebookresearch/esm.git, or via pip install `pip install fair-esm`.
 
 Optional: `pip install flash-attn==2.3` to speed up attention calculation.
 
@@ -233,7 +233,7 @@ Examples of this are given in later sections.
 
 We use `pytorch-lightning` for training and one can customize training via the documented flags under `trainer` in the config file.
 ```bash
-conda activate idpforge
+conda activate IDPForge
 python train.py --model_config_path configs/train.yml
 ```
 
@@ -253,7 +253,7 @@ We provide a commandline interface to sample single chain IDP/IDRs.
 ```
 usage: sample_idp.py seq ckpt_path output_dir sample_cfg
 [-h] [--batch BATCH] [--nconf NCONF] [--cuda] 
-[--verbose]$
+[--verbose]
 
 positional arguments:
   seq                protein sequence
@@ -269,12 +269,12 @@ optional arguments:
   --verbose          show or hide debugging logs
 ```
 
-Example to generate 100 conformers for Sic1:
+Example to generate 10 conformers for Sic1:
 
 ```bash
 mkdir test
 sequence="GSMTPSTPPRSRGTRYLAQPSGNTSSSALMQGQKTPQKPSQNLVPVTPSTTKSFKNAPLLAPPNSNMGMTSPFNGLTSPQRSPFPKSSVKRT"
-python sample_idp.py $sequence weights/mdl.ckpt test configs/sample.yml --nconf 100 --cuda --verbose
+python sample_idp.py $sequence weights/mdl.ckpt test configs/sample.yml --nconf 10 --batch 4 --cuda --verbose
 ```
 
 Inference time experimental guidance can be activated by the potential flag in the `configs/sample.yml`. An example PREs experimental data file is also provided in `data/sic1_pre_exp.txt`.
@@ -289,7 +289,7 @@ docker run -it --rm --gpus all \
     -v "./weights/":/app/weights \
     -w /app \
     idpforge:latest \
-    python -u /app/sample_idp.py $sequence /app/weights/mdl.ckpt /app/output /app/configs/sample.yml --nconf 100 --cuda --verbose
+    python -u /app/sample_idp.py $sequence /app/weights/mdl.ckpt /app/output /app/configs/sample.yml --nconf 10 --batch 4 --cuda --verbose
 ```
 
 ### IDRs with folded domains
@@ -300,10 +300,10 @@ python mk_ldr_template.py data/AF-P05231-F1-model_v4.pdb 1-41 data/AF-P05231_ndr
 ```
 The provided model weights are not recommended for predicting multiple domains at the same time.
 
-Then, to generate an IDRs with folded domains ensemble, run
+To generate an ensemble of IDRs with folded domains, run:
 ```bash
 mkdir P05231_build
-python sample_ldr.py weights/mdl.ckpt data/AF-P05231_ndr.npz P05231_build configs/sample.yml --nconf 100 --cuda --verbose
+python sample_ldr.py weights/mdl.ckpt data/AF-P05231_ndr.npz P05231_build configs/sample.yml --nconf 10 --batch 4 --cuda --verbose
 ```
 One can set the `attention_chunk` to manage memory usage for long sequences (Inference on long disordered sequences may be limited by training sequence length).
 
@@ -316,7 +316,7 @@ docker run -it --rm --gpus all \
     -v "./weights/":/app/weights \
     -w /app \
     idpforge:latest \
-    python -u /app/sample_ldr.py /app/weights/mdl.ckpt /app/data/AF-P05231_ndr.npz /app/output /app/configs/sample.yml --nconf 100 --cuda --verbose
+    python -u /app/sample_ldr.py /app/weights/mdl.ckpt /app/data/AF-P05231_ndr.npz /app/output /app/configs/sample.yml --nconf 10 --batch 4 --cuda --verbose
 ```
 
 ### Chemical shifts prediction and evaluating ensembles with X-EISD (optional)
