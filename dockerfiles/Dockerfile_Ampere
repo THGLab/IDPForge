@@ -1,49 +1,63 @@
-# Start from CUDA 12.1
+# IDPForge Docker image — Ampere variant (CUDA 12.1 / torch 2.5.1).
 FROM nvidia/cuda:12.1.0-devel-ubuntu22.04
 
-# Add metadata for the image.
 LABEL org.opencontainers.image.authors="O Zhang"
 
-# Install essential system tools
+# System packages
 RUN apt-get update && apt-get install -y \
-    wget \
-    git \
-    libxml2 \
-    build-essential \
+    wget git libxml2 build-essential ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Set up miniforge
+# Miniforge
 ENV CONDA_DIR="/opt/conda"
-RUN wget --quiet https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O ~/miniforge.sh && \
-    /bin/bash ~/miniforge.sh -b -p $CONDA_DIR && \
-    rm ~/miniforge.sh
+RUN wget --quiet https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O /tmp/miniforge.sh && \
+    bash /tmp/miniforge.sh -b -p $CONDA_DIR && \
+    rm /tmp/miniforge.sh
 ENV PATH="$CONDA_DIR/bin:$PATH"
 
-# Copy env.yml and create the conda environment
+# Conda env. CONDA_OVERRIDE_CUDA forces the CUDA variant of openmm
+# (the build host has no GPU, so __cuda is unset by default).
 COPY ./dockerfiles/env.yml /opt/idpforge/env.yml
-RUN mamba env create -f /opt/idpforge/env.yml && \
-    conda clean --all
+RUN CONDA_OVERRIDE_CUDA=12.2 mamba env create -f /opt/idpforge/env.yml && \
+    conda clean --all --yes
 ENV PATH="/opt/conda/envs/IDPForge/bin:$PATH"
 
-# Install PyTorch 2.5.1 using the specific CUDA 12.1 wheel
+# Pin pip to 25.2 — IDPForge installs break on other versions.
+RUN pip install --no-deps "pip==25.2" && \
+    test "$(pip --version | awk '{print $2}')" = "25.2"
+
+# Build tools for OpenFold's CUDA extension compile (without touching pip).
+RUN pip install --upgrade setuptools wheel
+
+# PyTorch matching the base image
 RUN pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121
 
-# Install DeepSpeed
-RUN pip install deepspeed==0.14.5
+# DeepSpeed (OpenFold transitive dep)
+RUN pip install deepspeed==0.14.5 && \
+    test "$(pip --version | awk '{print $2}')" = "25.2"
 
-# Install/upgrade essential Python build tools before compiling OpenFold from source
-RUN pip install --upgrade pip setuptools wheel
-
-# Clone OpenFold
+# OpenFold
 RUN git clone https://github.com/aqlaboratory/openfold.git /opt/openfold
-
-# Move modified OpenFold setup.py into the newly cloned OpenFold directory and install
 COPY ./dockerfiles/openfold_setup_12.1.py /opt/openfold/setup.py
 RUN wget -q -P /opt/openfold/openfold/resources \
     https://git.scicore.unibas.ch/schwede/openstructure/-/raw/7102c63615b64735c4941278d92b554ec94415f8/modules/mol/alg/src/stereo_chemical_props.txt && \
-    cd /opt/openfold && \
-    pip install --no-build-isolation .
+    cd /opt/openfold && pip install --no-build-isolation . && \
+    test "$(pip --version | awk '{print $2}')" = "25.2"
 
-# Copy the main application code and set the working directory.
+# IDPForge application code
 COPY . /app
 WORKDIR /app
+ENV PYTHONPATH="/app:$PYTHONPATH"
+ENV MPLCONFIGDIR="/tmp/matplotlib"
+
+# Build-time import self-test
+RUN python - <<'PY'
+import torch, numpy, scipy, pandas, mdtraj, yaml, tqdm
+import ml_collections, einops
+import Bio.PDB
+import openmm, pdbfixer
+import pytorch_lightning, tensorboard, modelcif
+import openfold, idpforge, esm
+print("torch:", torch.__version__, "cuda build:", torch.version.cuda)
+print("idpforge ok, openfold ok, esm ok")
+PY

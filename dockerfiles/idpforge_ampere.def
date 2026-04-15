@@ -1,0 +1,112 @@
+Bootstrap: docker
+From: nvidia/cuda:12.1.0-devel-ubuntu22.04
+
+# IDPForge Apptainer recipe — Ampere variant (CUDA 12.1 / torch 2.5.1).
+#
+# Prerequisites on the host before building (see README):
+#   weights/mdl.ckpt          — model checkpoint
+#   data/example_data.pkl     — fragment library
+#
+# Build:
+#   apptainer build idpforge.sif dockerfiles/idpforge_ampere.def
+#
+# Run:
+#   apptainer run --nv --pwd /opt/IDPForge \
+#       -B "$PWD/out":/app/out \
+#       idpforge.sif /opt/IDPForge/sample_idp.py \
+#           "$SEQ" /opt/IDPForge/weights/mdl.ckpt /app/out \
+#           /opt/IDPForge/configs/sample.yml --nconf 10 --cuda --verbose
+
+%files
+    .gitignore          /opt/IDPForge/.gitignore
+    AlphaFlex           /opt/IDPForge/AlphaFlex
+    LICENSE             /opt/IDPForge/LICENSE
+    README.md           /opt/IDPForge/README.md
+    configs             /opt/IDPForge/configs
+    data                /opt/IDPForge/data
+    dockerfiles         /opt/IDPForge/dockerfiles
+    environment.yml     /opt/IDPForge/environment.yml
+    esm                 /opt/IDPForge/esm
+    idpforge            /opt/IDPForge/idpforge
+    mk_flex_template.py /opt/IDPForge/mk_flex_template.py
+    mk_ldr_template.py  /opt/IDPForge/mk_ldr_template.py
+    relax_raw.py        /opt/IDPForge/relax_raw.py
+    sample_idp.py       /opt/IDPForge/sample_idp.py
+    sample_ldr.py       /opt/IDPForge/sample_ldr.py
+    setup.py            /opt/IDPForge/setup.py
+    train.py            /opt/IDPForge/train.py
+    weights             /opt/IDPForge/weights
+
+%post
+    set -eux
+
+    # System packages
+    apt-get update && apt-get install -y \
+        wget git libxml2 build-essential ca-certificates
+    rm -rf /var/lib/apt/lists/*
+
+    # Miniforge
+    export CONDA_DIR=/opt/conda
+    wget --quiet https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O /tmp/miniforge.sh
+    bash /tmp/miniforge.sh -b -p $CONDA_DIR
+    rm /tmp/miniforge.sh
+    export PATH=$CONDA_DIR/bin:$PATH
+
+    # Conda env. CONDA_OVERRIDE_CUDA forces the CUDA variant of openmm
+    # (the fakeroot build host has no GPU, so __cuda is unset by default).
+    export CONDA_OVERRIDE_CUDA=12.2
+    mamba env create -f /opt/IDPForge/dockerfiles/env.yml
+    conda clean --all --yes
+    export PATH=/opt/conda/envs/IDPForge/bin:$PATH
+
+    # Pin pip to 25.2 — IDPForge installs break on other versions.
+    pip install --no-deps "pip==25.2"
+    test "$(pip --version | awk '{print $2}')" = "25.2"
+
+    # Build tools for OpenFold's CUDA extension compile (without touching pip).
+    pip install --upgrade setuptools wheel
+
+    # PyTorch matching the base image
+    pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121
+
+    # DeepSpeed (OpenFold transitive dep)
+    pip install deepspeed==0.14.5
+
+    test "$(pip --version | awk '{print $2}')" = "25.2"
+
+    # OpenFold
+    git clone https://github.com/aqlaboratory/openfold.git /opt/openfold
+    cp /opt/IDPForge/dockerfiles/openfold_setup_12.1.py /opt/openfold/setup.py
+    wget -q -P /opt/openfold/openfold/resources \
+        https://git.scicore.unibas.ch/schwede/openstructure/-/raw/7102c63615b64735c4941278d92b554ec94415f8/modules/mol/alg/src/stereo_chemical_props.txt
+    cd /opt/openfold && pip install --no-build-isolation .
+
+    # IDPForge is exposed via PYTHONPATH in %environment
+    # (implicit namespace package — no classic setup.py install needed).
+
+    test "$(pip --version | awk '{print $2}')" = "25.2"
+
+%environment
+    export PATH=/opt/conda/envs/IDPForge/bin:$PATH
+    export PYTHONPATH=/opt/IDPForge:$PYTHONPATH
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+    export MPLCONFIGDIR=/tmp/matplotlib
+
+%runscript
+    exec python "$@"
+
+%test
+    python - <<'PY'
+import torch, numpy, scipy, pandas, mdtraj, yaml, tqdm
+import ml_collections, einops
+import Bio.PDB
+import openmm, pdbfixer
+import pytorch_lightning, tensorboard, modelcif
+import openfold, idpforge, esm
+print("torch:", torch.__version__, "cuda build:", torch.version.cuda)
+print("idpforge ok, openfold ok, esm ok")
+PY
+
+%labels
+    Variant "Ampere / CUDA 12.1 / torch 2.5.1"

@@ -9,7 +9,7 @@ import numpy as np
 import pickle
 import pandas as pd
 import random
-import pkg_resources
+from importlib.metadata import version
 import time
 from glob import glob
 
@@ -65,7 +65,7 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
     # 4. Load Weights
     print(f"[ldr] Loading Weights...", flush=True)
     pl_sd = torch.load(ckpt_path, map_location="cpu")
-    if int(pkg_resources.get_distribution("openfold").version[0]) > 1:
+    if int(version("openfold").split(".")[0]) > 1:
         sd = {k.replace("points.", "points.linear.") if k in old_params else k: v for k, v in pl_sd["ema"]["params"].items()}
     else:
         sd = {k: v for k, v in pl_sd["ema"]["params"].items()}
