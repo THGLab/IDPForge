@@ -27,6 +27,8 @@ try:
 except ImportError as e:
     sys.exit(f"CRITICAL ERROR: Missing Dependency.\n{e}")
 
+from idpforge.utils.structure_validation import load_knot_screening
+
 SEP = "-" * 60
 STATE_FILENAME = ".step3_state.json"
 
@@ -75,7 +77,7 @@ def _cleanup_dir(output_dir):
 # ------------------------------------------------------------------------
 # PHASE 1: GENERATION + RELAXATION (subprocess to sample_ldr.py)
 # ------------------------------------------------------------------------
-def generate_conformers(npz_path, output_dir, num_to_generate, verbose=False):
+def generate_conformers(npz_path, output_dir, num_to_generate, verbose=False, expected_knot_type=None):
     """
     Calls sample_ldr.py to generate, relax, repair, and validate conformers.
     Returns list of validated file paths.
@@ -99,6 +101,8 @@ def generate_conformers(npz_path, output_dir, num_to_generate, verbose=False):
         cmd.append("--cuda")
     if verbose:
         cmd.append("--verbose")
+    if expected_knot_type:
+        cmd.extend(["--expected_knot_type", expected_knot_type])
 
     if verbose:
         print(f"   [Gen] Launching subprocess on GPU...", flush=True)
@@ -146,7 +150,7 @@ def _count_validated(output_dir):
 # ------------------------------------------------------------------------
 # MAIN WORKFLOW PER IDR
 # ------------------------------------------------------------------------
-def run_idr_workflow(prot_id, npz_path, start_res, end_res, verbose=False):
+def run_idr_workflow(prot_id, npz_path, start_res, end_res, verbose=False, expected_knot_type=None):
     range_tag = f"idr_{start_res}-{end_res}"
     output_dir = os.path.join(cfg.CONFORMER_POOL_DIR, prot_id, range_tag)
     os.makedirs(output_dir, exist_ok=True)
@@ -183,7 +187,8 @@ def run_idr_workflow(prot_id, npz_path, start_res, end_res, verbose=False):
             print(f"   [Status] Have {num_val}/{cfg.SAMPLE_N_CONFS}. Need {needed}. Generating {num_to_generate}.", flush=True)
 
         # 2. Generate + relax + validate conformers (sample_ldr handles all via output_to_pdb)
-        validated_files = generate_conformers(npz_path, output_dir, num_to_generate, verbose=verbose)
+        validated_files = generate_conformers(npz_path, output_dir, num_to_generate,
+                                              verbose=verbose, expected_knot_type=expected_knot_type)
 
         new_valid = len(validated_files) - num_val
         total_attempts += num_to_generate
@@ -251,6 +256,16 @@ def main(args):
     if args.total_splits > 1:
         my_chunk = np.array_split(all_ids, args.total_splits)[args.split_index].tolist()
 
+    # Load pre-computed knot screening for topology matching
+    knot_screening_path = getattr(cfg, 'KNOT_SCREENING_PATH',
+        os.path.join(cfg.INPUT_DATA_DIR, "knot_screening.json"))
+    knot_screening = load_knot_screening(knot_screening_path)
+    if knot_screening:
+        n_knotted = sum(1 for v in knot_screening.values() if v is not None)
+        print(f"Knot screening: {len(knot_screening)} entries ({n_knotted} natively knotted).", flush=True)
+    else:
+        print(f"Knot screening: not available (all knots will be rejected).", flush=True)
+
     print(f"Job {args.split_index+1}/{args.total_splits}: Processing {len(my_chunk)} Proteins", flush=True)
     print(f"Target: {cfg.SAMPLE_N_CONFS} conformers per IDR | "
           f"Max attempts: {cfg.SAMPLE_MAX_TOTAL_ATTEMPTS}", flush=True)
@@ -263,9 +278,15 @@ def main(args):
             print(f"   [SKIP] No templates found.", flush=True)
             continue
 
+        # Look up expected knot type for this protein
+        expected_knot_type = knot_screening.get(prot_id) if knot_screening else None
+
         print(f"   Found {len(templates)} regions.", flush=True)
+        if expected_knot_type:
+            print(f"   [Topology] Native knot: {expected_knot_type}", flush=True)
         for t in templates:
-            run_idr_workflow(prot_id, t["path"], t["start"], t["end"], verbose=verbose)
+            run_idr_workflow(prot_id, t["path"], t["start"], t["end"],
+                            verbose=verbose, expected_knot_type=expected_knot_type)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Step 3: Phased Conformer Generation Pipeline")

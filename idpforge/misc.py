@@ -143,6 +143,7 @@ def output_to_pdb(
     counter=1,
     counter_cap=None,
     verbose=False,
+    expected_knot_type=None,
     **kwargs
 ):
     """
@@ -334,7 +335,8 @@ def output_to_pdb(
                 chk = OMMPDBFile(relaxed_path)
                 is_valid, info = validate_structure_post_relax(
                     chk.topology, chk.positions, pdb_path=relaxed_path,
-                    full_report=True
+                    full_report=True,
+                    expected_knot_type=expected_knot_type
                 )
             except Exception as e:
                 is_valid = False
@@ -357,7 +359,15 @@ def output_to_pdb(
                 chiral_str = "PASS" if chiral_pass else "FAIL (D-Amino detected)"
                 bonds_str = "PASS" if bonds_pass else f"FAIL ({n_broken} broken)"
                 clash_str = "PASS" if clash_pass else "FAIL"
-                knot_str = "PASS" if knot_pass else f"FAIL ({knot_type})"
+
+                if expected_knot_type:
+                    detected = info.get("detected_knot_type")
+                    if knot_pass:
+                        knot_str = f"PASS (native {expected_knot_type})"
+                    else:
+                        knot_str = f"FAIL (expected {expected_knot_type}, got {detected})"
+                else:
+                    knot_str = "PASS" if knot_pass else f"FAIL ({knot_type})"
 
                 print(f"       [TIMING] Validation: {elapsed:.2f}s", flush=True)
                 print(f"       [POST-MIN CHECK] Validation Results", flush=True)

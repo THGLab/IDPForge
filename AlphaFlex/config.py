@@ -25,6 +25,7 @@ INPUT_DATA_DIR = os.path.join(PROJECT_ROOT, "Data_Inputs")
 MASTER_DB_PATH = os.path.join(INPUT_DATA_DIR, "AlphaFlex_database_Nov2025.json")
 LENGTH_REF_PATH = os.path.join(INPUT_DATA_DIR, "AF2_9606_HUMAN_v4_num_residues.json")
 PDB_LIBRARY_PATH = os.path.join(INPUT_DATA_DIR, "Test_Structures")
+KNOT_SCREENING_PATH = os.path.join(INPUT_DATA_DIR, "knot_screening.json")
 
 PIPELINE_OUTPUT_ROOT = os.path.join(PROJECT_ROOT, "Pipeline_Outputs")
 

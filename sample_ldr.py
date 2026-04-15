@@ -40,7 +40,8 @@ def combine_sec(fold_ss, idr_ss, mask):
 
 def main(ckpt_path, fold_template, output_dir, sample_cfg,
         batch_size=32, nsample=200, attn_chunk_size=None,
-        device="cpu", ss_db_path=None, no_relax=False, verbose=False):
+        device="cpu", ss_db_path=None, no_relax=False, verbose=False,
+        expected_knot_type=None):
 
     # 1. Load Config
     print(f"[ldr] Loading Config: {sample_cfg}", flush=True)
@@ -167,7 +168,7 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
         output_to_pdb(outputs, relax=relax_opts,
                 save_path=abs_output_dir, counter=start_idx,
                 counter_cap=nsample, viol_mask=~fold_data["mask"],
-                verbose=verbose)
+                verbose=verbose, expected_knot_type=expected_knot_type)
 
         # Re-count actual files on disk (some conformers may be rejected by relaxation)
         current_count = count_done()
@@ -188,6 +189,9 @@ if __name__ == "__main__":
     parser.add_argument('--ss_db', default=None, type=str)
     parser.add_argument('--no_relax', action="store_true", help="Skip relaxation (outputs raw pdb)")
     parser.add_argument('--verbose', action="store_true", help="Print structural validation details")
+    parser.add_argument('--expected_knot_type', default=None, type=str,
+                        help="Native knot type of AF2 template (e.g. 3_1). "
+                             "Conformers matching this type pass topology validation.")
 
     args = parser.parse_args()
 
@@ -199,4 +203,5 @@ if __name__ == "__main__":
          device=device,
          ss_db_path=args.ss_db,
          no_relax=args.no_relax,
-         verbose=args.verbose)
+         verbose=args.verbose,
+         expected_knot_type=args.expected_knot_type)

@@ -16,10 +16,13 @@ Features:
 """
 
 from __future__ import annotations
+import json
 import math
+import os
+import re
 import time
 import logging
-from typing import Any, Tuple, Dict, List
+from typing import Any, Tuple, Dict, List, Optional
 
 import numpy as np
 from scipy.spatial import cKDTree
@@ -36,6 +39,49 @@ ALEXANDER_TRIES        = 100
 # Thresholds for Alexander Gatekeeper
 # 0.65 = Must match unknot in 65/100 projections to exit early.
 ALPHAKNOT_P_UNKNOT_MAX = 0.65
+
+_KNOT_RE = re.compile(r"HOMFLY_Knot\((.+)\)")
+
+
+# ============================================================
+# 0. KNOT SCREENING UTILITIES
+# ============================================================
+def extract_knot_type(reason: Optional[str]) -> Optional[str]:
+    """Extract canonical knot type from a topology reason string.
+
+    Examples:
+        "HOMFLY_Knot(3_1)"    -> "3_1"
+        "HOMFLY_Knot(TMC)"    -> "TMC"
+        "HOMFLY_Knot(3_1#3_1)"-> "3_1#3_1"
+        "HighConf_Unknot=0.98" -> None
+        "HOMFLY_Unknot"       -> None
+        None                  -> None
+    """
+    if reason is None:
+        return None
+    m = _KNOT_RE.search(reason)
+    return m.group(1) if m else None
+
+
+def load_knot_screening(json_path: str) -> Dict[str, Optional[str]]:
+    """Load knot_screening.json and return {protein_id: knot_type_or_None}.
+
+    Proteins classified as "Knot" map to their type string (e.g. "3_1").
+    Proteins classified as "None" (unknotted) map to None.
+    If the file does not exist, returns an empty dict (fallback: reject all knots).
+    """
+    if not os.path.isfile(json_path):
+        return {}
+    with open(json_path) as f:
+        raw = json.load(f)
+    out: Dict[str, Optional[str]] = {}
+    for pid, info in raw.items():
+        if info.get("label") == "Knot":
+            out[pid] = extract_knot_type(info.get("reason"))
+        else:
+            out[pid] = None
+    return out
+
 
 # ============================================================
 # 1. HELPERS
@@ -278,7 +324,7 @@ def classify_global_topology_alphaknot(topology, positions, VERBOSE=False):
 def validate_structure_post_relax(
     topology, positions, pdb_path="", strict_clash_threshold=10.0,
     idr_start=None, idr_end=None, attempts=None, verbose=False,
-    full_report=False
+    full_report=False, expected_knot_type=None
 ):
     """
     Main validation function.
@@ -287,6 +333,9 @@ def validate_structure_post_relax(
         full_report: If True, runs ALL checks regardless of failures and
                      populates every field in the info dict. If False
                      (default), short-circuits on the first failure for speed.
+        expected_knot_type: If provided, conformers matching this knot type
+                     pass topology validation (e.g. "3_1" for trefoil).
+                     If None, all knotted conformers are rejected (default).
     """
     info = {"pdb_path": pdb_path}
     all_pass = True
@@ -342,11 +391,22 @@ def validate_structure_post_relax(
     t0 = time.perf_counter()
     topo = classify_global_topology_alphaknot(topology, positions, VERBOSE=verbose)
     info["Time_Knots_s"] = round(time.perf_counter() - t0, 6)
-    info["knot_pass"] = (topo["label"] == "None")
-    info["knot_type"] = topo.get("label")
     info["Topology_Source"] = "AlexanderProb" if not topo.get("HOMFLY_Ran") else "HOMFLY"
     info["Alexander_Ran"] = topo.get("Alexander_Ran", False)
     info["HOMFLY_Ran"] = topo.get("HOMFLY_Ran", False)
+
+    detected_knot = extract_knot_type(topo.get("reason"))
+    info["knot_type"] = topo.get("label")
+    info["detected_knot_type"] = detected_knot
+    info["expected_knot_type"] = expected_knot_type
+
+    if expected_knot_type is not None:
+        # Knot-matching mode: conformer must match the template's native topology
+        info["knot_pass"] = (detected_knot == expected_knot_type)
+    else:
+        # Default mode: reject all knotted conformers
+        info["knot_pass"] = (topo["label"] == "None")
+
     if not info["knot_pass"]:
         all_pass = False
         if not full_report:
