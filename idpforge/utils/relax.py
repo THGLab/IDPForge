@@ -37,11 +37,18 @@ def relax_protein(config, model_device, unrelaxed_protein,
         logger.info("Minimization failed...abort")
         return 0
     aatype = unrelaxed_protein.aatype
-    if len(ring_AA.intersection({a for a, v in zip(aatype, viol) if bool(v)})) > 0:
+    violated_ring = ring_AA.intersection({a for a, v in zip(aatype, viol) if bool(v)})
+    if len(violated_ring) > 0:
+        names = [residue_constants.restypes[a] for a in violated_ring]
+        print(f"       [RELAX] Rejected: ring AA violation ({', '.join(names)})", flush=True)
         return 0
     if viol_mask is None:
         viol_mask = np.ones(len(viol))
-    if sum(viol*viol_mask.astype(float))/sum(viol_mask) > viol_threshold or sum(viol) > 4:
+    rate = sum(viol*viol_mask.astype(float)) / max(sum(viol_mask), 1)
+    total_viol = int(sum(viol))
+    if rate > viol_threshold or total_viol > 4:
+        print(f"       [RELAX] Rejected: IDR viol rate={rate:.3f} (limit {viol_threshold}) | "
+              f"total={total_viol} (limit 4)", flush=True)
         return 0
 
     os.environ["CUDA_VISIBLE_DEVICES"] = visible_devices
@@ -49,7 +56,8 @@ def relax_protein(config, model_device, unrelaxed_protein,
     relaxed_output = os.path.join(output_dir, f'{pdb_name}_relaxed.pdb')
     with open(relaxed_output, 'w') as fp:
         fp.write(struct_str)
-    print(f"       [RELAX] Saved {relaxed_output} ({relaxation_time:.2f}s)", flush=True)
+    print(f"       [RELAX] Saved {relaxed_output} ({relaxation_time:.2f}s) | "
+          f"IDR viol rate={rate:.3f} | total={total_viol}", flush=True)
     return 1
 
 
