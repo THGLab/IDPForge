@@ -360,12 +360,14 @@ def output_to_pdb(
                 bonds_str = "PASS" if bonds_pass else f"FAIL ({n_broken} broken)"
                 clash_str = "PASS" if clash_pass else "FAIL"
 
-                if expected_knot_type:
+                if expected_knot_type is not None:
                     detected = info.get("detected_knot_type")
+                    disp = info.get("expected_knot_display") or str(expected_knot_type)
                     if knot_pass:
-                        knot_str = f"PASS (native {expected_knot_type})"
+                        knot_str = f"PASS (native {disp})"
                     else:
-                        knot_str = f"FAIL (expected {expected_knot_type}, got {detected})"
+                        fail_reason = info.get("knot_fail_reason", "")
+                        knot_str = f"FAIL (expected {disp}, got {detected}) [{fail_reason}]"
                 else:
                     knot_str = "PASS" if knot_pass else f"FAIL ({knot_type})"
 

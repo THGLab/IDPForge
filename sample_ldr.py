@@ -190,12 +190,30 @@ if __name__ == "__main__":
     parser.add_argument('--no_relax', action="store_true", help="Skip relaxation (outputs raw pdb)")
     parser.add_argument('--verbose', action="store_true", help="Print structural validation details")
     parser.add_argument('--expected_knot_type', default=None, type=str,
-                        help="Native knot type of AF2 template (e.g. 3_1). "
-                             "Conformers matching this type pass topology validation.")
+                        help="Per-domain knot spec as a JSON string "
+                             '(e.g. \'[{"range":[65,280],"knot":null},'
+                             '{"range":[320,450],"knot":"3_1"}]\'). '
+                             "An empty list means no topological constraint. "
+                             "Omit the flag to apply the legacy full-chain unknot baseline.")
 
     args = parser.parse_args()
 
     device = "cuda" if args.cuda and torch.cuda.is_available() else "cpu"
+
+    # Parse the per-domain spec JSON at the CLI boundary; hand a Python
+    # list (or None) to main() so downstream code never has to deal with
+    # the string form.
+    expected_spec = None
+    if args.expected_knot_type is not None:
+        import json as _json
+        try:
+            expected_spec = _json.loads(args.expected_knot_type)
+        except _json.JSONDecodeError as exc:
+            sys.exit(f"[ldr] ERROR: --expected_knot_type must be valid JSON "
+                     f"(got {args.expected_knot_type!r}): {exc}")
+        if not isinstance(expected_spec, list):
+            sys.exit(f"[ldr] ERROR: --expected_knot_type JSON must be a list, "
+                     f"got {type(expected_spec).__name__}")
 
     main(args.ckpt_path, args.fold_input, args.out_dir, args.sample_cfg,
          args.batch, args.nconf,
@@ -204,4 +222,4 @@ if __name__ == "__main__":
          ss_db_path=args.ss_db,
          no_relax=args.no_relax,
          verbose=args.verbose,
-         expected_knot_type=args.expected_knot_type)
+         expected_knot_type=expected_spec)

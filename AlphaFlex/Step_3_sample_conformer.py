@@ -27,7 +27,8 @@ try:
 except ImportError as e:
     sys.exit(f"CRITICAL ERROR: Missing Dependency.\n{e}")
 
-from idpforge.utils.structure_validation import load_knot_screening
+import json as _json_for_knots
+from idpforge.utils.structure_validation import load_knot_screening, format_domain_spec
 
 SEP = "-" * 60
 STATE_FILENAME = ".step3_state.json"
@@ -101,8 +102,11 @@ def generate_conformers(npz_path, output_dir, num_to_generate, verbose=False, ex
         cmd.append("--cuda")
     if verbose:
         cmd.append("--verbose")
-    if expected_knot_type:
-        cmd.extend(["--expected_knot_type", expected_knot_type])
+    # expected_knot_type is a per-domain spec (list of {range, knot}) or None.
+    # Serialize to JSON for the sample_ldr subprocess CLI. An empty list is a
+    # meaningful signal ("no folded domain to constrain") and must still be passed.
+    if expected_knot_type is not None:
+        cmd.extend(["--expected_knot_type", _json_for_knots.dumps(expected_knot_type)])
 
     if verbose:
         print(f"   [Gen] Launching subprocess on GPU...", flush=True)
@@ -261,10 +265,14 @@ def main(args):
         os.path.join(cfg.INPUT_DATA_DIR, "knot_screening.json"))
     knot_screening = load_knot_screening(knot_screening_path)
     if knot_screening:
-        n_knotted = sum(1 for v in knot_screening.values() if v is not None)
-        print(f"Knot screening: {len(knot_screening)} entries ({n_knotted} natively knotted).", flush=True)
+        n_knotted = sum(
+            1 for spec in knot_screening.values()
+            if any(d.get("knot") for d in spec)
+        )
+        print(f"Knot screening: {len(knot_screening)} entries "
+              f"({n_knotted} with at least one natively knotted domain).", flush=True)
     else:
-        print(f"Knot screening: not available (all knots will be rejected).", flush=True)
+        print(f"Knot screening: not available (full-chain unknot baseline will be applied).", flush=True)
 
     print(f"Job {args.split_index+1}/{args.total_splits}: Processing {len(my_chunk)} Proteins", flush=True)
     print(f"Target: {cfg.SAMPLE_N_CONFS} conformers per IDR | "
@@ -278,12 +286,14 @@ def main(args):
             print(f"   [SKIP] No templates found.", flush=True)
             continue
 
-        # Look up expected knot type for this protein
+        # Look up expected per-domain knot spec for this protein. Absent
+        # entries fall through as None -> legacy full-chain unknot baseline.
         expected_knot_type = knot_screening.get(prot_id) if knot_screening else None
 
         print(f"   Found {len(templates)} regions.", flush=True)
-        if expected_knot_type:
-            print(f"   [Topology] Native knot: {expected_knot_type}", flush=True)
+        if expected_knot_type is not None:
+            print(f"   [Topology] Native spec: {format_domain_spec(expected_knot_type)}",
+                  flush=True)
         for t in templates:
             run_idr_workflow(prot_id, t["path"], t["start"], t["end"],
                             verbose=verbose, expected_knot_type=expected_knot_type)

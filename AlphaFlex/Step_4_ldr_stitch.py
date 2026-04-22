@@ -94,7 +94,8 @@ except ImportError:
 from utils.smart_scoring import get_smart_threshold
 from idpforge.utils.structure_repair import repair_chirality, fix_histidine_naming
 from idpforge.utils.structure_validation import (
-    validate_structure_post_relax, check_bond_integrity, load_knot_screening
+    validate_structure_post_relax, check_bond_integrity, load_knot_screening,
+    format_domain_spec
 )
 # ---
 
@@ -322,8 +323,9 @@ def process_protein(protein_id, labeled_db, id_to_pdb_path, conformer_root_dir, 
 
     # Loop
     if verbose:
-        if expected_knot_type:
-            print(f"  [Topology] Native knot: {expected_knot_type} (conformers must match)")
+        if expected_knot_type is not None:
+            print(f"  [Topology] Native spec: {format_domain_spec(expected_knot_type)} "
+                  f"(each folded domain's knot must match)")
         print(f"  Generating {num_conformers} conformers ({mode})...")
         print(f"  [Resume] Found {existing_final} in final, {max_temp_idx} in temp. Starting at {done+1}.")
 
@@ -460,12 +462,14 @@ def process_protein(protein_id, labeled_db, id_to_pdb_path, conformer_root_dir, 
                 bonds_str = "PASS" if info.get("bonds_pass", True) else f"FAIL ({info.get('num_broken_bonds', 0)} broken)"
                 clash_str = "PASS" if info.get("clash_pass", True) else "FAIL"
 
-                if expected_knot_type:
+                if expected_knot_type is not None:
                     detected = info.get("detected_knot_type")
+                    disp = info.get("expected_knot_display") or format_domain_spec(expected_knot_type)
                     if info.get("knot_pass", True):
-                        knot_str = f"PASS (native {expected_knot_type})"
+                        knot_str = f"PASS (native {disp})"
                     else:
-                        knot_str = f"FAIL (expected {expected_knot_type}, got {detected})"
+                        fail_reason = info.get("knot_fail_reason", "")
+                        knot_str = f"FAIL (expected {disp}, got {detected}) [{fail_reason}]"
                 else:
                     knot_str = "PASS" if info.get("knot_pass", True) else f"FAIL ({info.get('knot_type')})"
 
@@ -594,10 +598,14 @@ if __name__ == "__main__":
         os.path.join(cfg.INPUT_DATA_DIR, "knot_screening.json"))
     knot_screening = load_knot_screening(knot_screening_path)
     if knot_screening:
-        n_knotted = sum(1 for v in knot_screening.values() if v is not None)
-        print(f"    Knot screening: {len(knot_screening)} entries ({n_knotted} natively knotted).")
+        n_knotted = sum(
+            1 for spec in knot_screening.values()
+            if any(d.get("knot") for d in spec)
+        )
+        print(f"    Knot screening: {len(knot_screening)} entries "
+              f"({n_knotted} with at least one natively knotted domain).")
     else:
-        print(f"    Knot screening: not available (all knots will be rejected).")
+        print(f"    Knot screening: not available (full-chain unknot baseline will be applied).")
 
     final_root_dir = args.output_dir
     temp_working_dir = os.path.join(final_root_dir, f"_temp_work_{batch_label}_{args.split_index}")
