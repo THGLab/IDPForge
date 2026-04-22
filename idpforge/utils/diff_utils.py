@@ -189,12 +189,16 @@ def get_next_frames(xt, px0, t, diffuser, diffusion_mask, noise_scale=1.0):
     # collinear or coincident N/Ca/C atoms.
     for R in [R_0, R_t]:
         dets = np.linalg.det(R)
-        bad = np.abs(dets) < 1e-6
+        bad = (np.abs(dets) < 1e-6) | np.isnan(dets)
         if np.any(bad):
             R[bad] = np.eye(3)
 
-    R_0 = scipy_R.from_matrix(R_0).as_matrix().reshape(B, L, 3, 3)
-    R_t = scipy_R.from_matrix(R_t).as_matrix().reshape(B, L, 3, 3)
+    try:
+        R_0 = scipy_R.from_matrix(R_0).as_matrix().reshape(B, L, 3, 3)
+        R_t = scipy_R.from_matrix(R_t).as_matrix().reshape(B, L, 3, 3)
+    except np.linalg.LinAlgError:
+        print("SVD not converged in get_next_frames; rotation not applied")
+        return xt.copy(), np.tile(np.identity(3), (B, L, 1, 1))
     all_rot_transitions = np.tile(np.identity(3), (B, L, 1, 1))
   
     # Sample next frame for each residue
@@ -655,7 +659,15 @@ class IGSO3:
         # compute rotation vector corresponding to prediction of how r_t goes to r_0
         B, L = R_0.shape[:2]
         R_0t = np.einsum("...ij,...kj->...ik", R_t, R_0).reshape(-1, 3, 3)
-        R_0t_rotvec = scipy_R.from_matrix(R_0t).as_rotvec() # shape *, 3
+        # Sanitize degenerate matrices before SVD
+        bad = np.isnan(R_0t).any(axis=(-2, -1))
+        if np.any(bad):
+            R_0t[bad] = np.eye(3)
+        try:
+            R_0t_rotvec = scipy_R.from_matrix(R_0t).as_rotvec() # shape *, 3
+        except np.linalg.LinAlgError:
+            print("SVD not converged in reverse_sample; rotation not applied")
+            return np.tile(np.identity(3), (B, L, 1, 1))
      
         # Approximate the score based on the prediction of R0.
         # R_t @ hat(Score_approx) is the score approximation in the Lie algebra

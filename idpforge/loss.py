@@ -138,8 +138,11 @@ def cb_dist_loss(pred, true_coords, loop_clamp, eps=1e-6, l_coef=1.):
     sec_mask = (pred["sstype"] < 2).float()
     sec_mask = sec_mask[..., None] * sec_mask[..., None, :] * square_mask
     sec_error = torch.clamp(pred_d - true_d, min=eps, max=loop_clamp)
-    return ((square_mask * error**2).sum() / square_mask.sum() + ca_loss) * l_coef + \
-            (sec_mask * sec_error**2).sum() / sec_mask.sum() 
+    # Guard against zero-element masks (e.g., all-coil IDP batches have no sstype<2 residues)
+    sq_denom = square_mask.sum().clamp(min=1.0)
+    sec_denom = sec_mask.sum().clamp(min=1.0)
+    return ((square_mask * error**2).sum() / sq_denom + ca_loss) * l_coef + \
+            (sec_mask * sec_error**2).sum() / sec_denom
 
 def dist_loss(pred_coords, true_coords, pos_mask, clamp, eps=1e-6):
     pred_d = torch.sum(
