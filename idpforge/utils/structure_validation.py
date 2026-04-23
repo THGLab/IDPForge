@@ -64,17 +64,8 @@ def extract_knot_type(reason: Optional[str]) -> Optional[str]:
 
 
 def load_knot_screening(json_path: str) -> Dict[str, List[Dict[str, Any]]]:
-    """Load knot_screening.json and return per-protein folded-domain specs.
-
-    Returns:
-        {protein_id: [{"range": [start, end], "knot": knot_type_or_None}, ...]}
-
-    An empty list for a protein means it has no folded domains long enough
-    to carry meaningful topology (e.g. fully disordered protein); validation
-    treats this as "no constraint".
-
-    If the file does not exist, returns an empty dict; missing entries at
-    inference fall back to the legacy full-chain baseline (reject all knots).
+    """Return {protein_id: [{"range": [start, end], "knot": K_or_None}, ...]}.
+    Empty list = no folded domain to constrain. Missing file = empty dict.
     """
     if not os.path.isfile(json_path):
         return {}
@@ -109,7 +100,7 @@ def format_domain_spec(spec: Optional[List[Dict[str, Any]]]) -> str:
     for i, d in enumerate(spec, start=1):
         rng = d.get("range", [None, None])
         knot = d.get("knot")
-        parts.append(f"D{i}[{rng[0]}-{rng[1]}]={knot or 'U'}")
+        parts.append(f"F{i}[{rng[0]}-{rng[1]}]={knot or 'U'}")
     return ",".join(parts)
 
 
@@ -258,10 +249,7 @@ def check_clashes_detailed(topology, positions, overlap_cutoff=0.4, idr_start=No
 # 3. TOPOLOGY (AlphaKnot2 Hybrid)
 # ============================================================
 def _classify_coords_alphaknot(coords_list):
-    """
-    Run the Alexander/HOMFLY hybrid classifier on a CA coordinate list.
-    Shared by full-chain and per-domain paths.
-    """
+    """Run the Alexander/HOMFLY hybrid classifier on a CA coordinate list."""
     import topoly as tp
     from topoly.params import Closure
 
@@ -327,10 +315,7 @@ def _classify_coords_alphaknot(coords_list):
 
 
 def classify_global_topology_alphaknot(topology, positions, VERBOSE=False):
-    """
-    Full-chain knot classification using the Alexander/HOMFLY hybrid.
-    Used as the legacy fallback when no per-domain spec is available.
-    """
+    """Full-chain Alexander/HOMFLY classification."""
     pos = _get_coords_64(topology, positions)
     ca_atoms = sorted([a for a in topology.atoms() if a.name == "CA"],
                       key=lambda x: int(x.residue.id))
@@ -341,19 +326,12 @@ def classify_global_topology_alphaknot(topology, positions, VERBOSE=False):
 
 
 def classify_per_domain_topology(topology, positions, domains):
-    """
-    Classify each folded domain independently.
+    """Classify each folded domain range independently.
 
-    Args:
-        domains: list of {"range": [start, end], "knot": K_or_None}.
-
-    Returns:
-        list of per-domain dicts with keys:
-            range, label, knot, reason, expected_knot
-        Domains for which no CA atoms fall in the range are marked Error.
+    domains: [{"range": [start, end], "knot": K_or_None}, ...]
+    Returns per-domain dicts: range, label, knot, reason, expected_knot.
     """
     pos = _get_coords_64(topology, positions)
-    # Build resid -> CA coord map (use first occurrence of CA per residue).
     ca_by_resid: Dict[int, Any] = {}
     for a in topology.atoms():
         if a.name != "CA":
@@ -405,14 +383,10 @@ def validate_structure_post_relax(
         full_report: If True, runs ALL checks regardless of failures and
                      populates every field in the info dict. If False
                      (default), short-circuits on the first failure for speed.
-        expected_knot_type: Per-domain knot spec or legacy scalar.
-                     - list of {"range": [a,b], "knot": K_or_None}:
-                         Run per-domain classification; every folded domain
-                         must match its native knot for topology to pass.
-                         An empty list means "no folded domain long enough
-                         to constrain", which passes trivially.
-                     - str (legacy): full-chain match against this type.
-                     - None (default baseline): full-chain unknot required.
+        expected_knot_type:
+            list[{range, knot}] -> per-domain match (empty list passes).
+            str                 -> legacy full-chain scalar match.
+            None                -> legacy full-chain unknot required.
     """
     info = {"pdb_path": pdb_path}
     all_pass = True
@@ -471,9 +445,7 @@ def validate_structure_post_relax(
         if isinstance(expected_knot_type, list) else str(expected_knot_type)
 
     if isinstance(expected_knot_type, list):
-        # Per-domain mode
         if not expected_knot_type:
-            # No folded domain long enough to constrain topology
             info["Time_Knots_s"] = round(time.perf_counter() - t0, 6)
             info["Topology_Source"] = "PerDomain(empty)"
             info["Alexander_Ran"] = False
@@ -493,19 +465,19 @@ def validate_structure_post_relax(
 
             mismatches = []
             errors = []
-            for d in per_dom:
+            for i, d in enumerate(per_dom, start=1):
                 if d["label"] == "Error":
-                    errors.append(f"D[{d['range'][0]}-{d['range'][1]}]:{d.get('reason', '')}")
+                    errors.append(f"F{i}[{d['range'][0]}-{d['range'][1]}]:{d.get('reason', '')}")
                     continue
                 if d["knot"] != d["expected_knot"]:
                     mismatches.append(
-                        f"D[{d['range'][0]}-{d['range'][1]}]:"
+                        f"F{i}[{d['range'][0]}-{d['range'][1]}]:"
                         f"exp={d['expected_knot'] or 'U'},got={d['knot'] or 'U'}"
                     )
 
             info["knot_type"] = "Knot" if any(d["knot"] for d in per_dom) else "None"
             info["detected_knot_type"] = ",".join(
-                f"D{i}={d['knot'] or 'U'}" for i, d in enumerate(per_dom, start=1)
+                f"F{i}={d['knot'] or 'U'}" for i, d in enumerate(per_dom, start=1)
             )
             info["knot_pass"] = (not mismatches) and (not errors)
             if not info["knot_pass"]:
@@ -516,7 +488,6 @@ def validate_structure_post_relax(
                     reason_bits.append("KnotError(" + "|".join(errors) + ")")
                 info["knot_fail_reason"] = ";".join(reason_bits)
     else:
-        # Legacy full-chain mode (scalar expected, or None baseline)
         topo = classify_global_topology_alphaknot(topology, positions, VERBOSE=verbose)
         info["Time_Knots_s"] = round(time.perf_counter() - t0, 6)
         info["Topology_Source"] = "AlexanderProb" if not topo.get("HOMFLY_Ran") else "HOMFLY"
