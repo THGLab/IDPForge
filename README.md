@@ -26,6 +26,8 @@ The base environment can be built manually via the `environment.yml` file in the
 conda env create -f environment.yml
 ```
 
+> Note: The default `environment.yml` file is set to install `torch==2.5.1 and cuda==12.1` for earlier GPUs (sm_60 - sm_80). If you have newer GPUs (released after Q4 2025) and run into issues with the 12.1 installation, switch to `torch==2.7.1 and cuda==12.8`. Although the 12.8 build nominally covers sm_60 - sm_120, it is not fully backwards compatible with older architectures, so the 12.1 default is preferred for earlier GPUs. Refer to the comments in the file for modification instructions.
+
 Once the environment is created, activate it.
 
 ```bash
@@ -37,8 +39,6 @@ Then install IDPForge as a module in the environment.
 ```bash
 pip install -e .
 ```
-
-> Note: The default `environment.yml` file is set to install `torch==2.5.1 and cuda==12.1` for earlier GPUs (sm_60 - sm_80). Optionally, this may be changed to install `torch==2.7.1 and cuda==12.8` for later generation GPUs (sm_60 - sm_120). Refer to the comments in the file for modification instructions. 
 
 This repo also requires `OpenFold` utilities, so that repository must be cloned in the same directory as IDPForge. To do this, first navigate to the parent directory.
 
@@ -114,12 +114,26 @@ Then navigate into the OpenFold directory.
 cd openfold/
 ``` 
 
-Create the OpenFold environment using the following command.
+First, make a copy of the `environment.yml` file without `flash-attn` so it is not installed during environment creation.
 
 ```bash
-mamba env create -n openfold_env -f environment.yml
+python - <<'PY'
+from pathlib import Path
+src = Path("environment.yml")
+dst = Path("environment_noflash.yml")
+lines = src.read_text().splitlines()
+lines = [ln for ln in lines if "flash-attn" not in ln]
+dst.write_text("\n".join(lines) + "\n")
+print("Wrote", dst)
+PY
 ```
-> Note: This can also be run with `conda env create -n openfold_env -f environment.yml`
+
+Then create the OpenFold environment from the stripped file.
+
+```bash
+mamba env create -n openfold_env -f environment_noflash.yml
+```
+> Note: This can also be run with `conda env create -n openfold_env -f environment_noflash.yml`
 
 Then activate the environment.
 
@@ -141,13 +155,7 @@ conda install mmseqs2 -c bioconda
 pip install tensorboard topoly
 ``` 
 
-It is also recommended to uninstall flash-attn when starting out if this installation pathway is chosen.
-
-```bash
-pip uninstall flash-attn
-```
-
-Once flash-attn is uninstalled, navigate into the resources of OpenFold.
+Navigate into the resources of OpenFold.
 
 ```bash
 cd openfold/resources
@@ -168,9 +176,9 @@ cd ../../
 Install OpenFold as a module in the environment.
 
 ```bash
-pip install -e .
+pip install . --no-build-isolation
 ```
-> Note: If `pip install -e .` does not work, proceed with `pip install . --no-build-isolation` instead.
+> Note: If `pip install . --no-build-isolation` does not work, proceed with `pip install -e .` instead.
 
 Navigate to the IDPForge directory.
 
@@ -181,9 +189,9 @@ cd ../IDPForge
 Install IDPForge as a module.
 
 ```bash
-pip install -e .
+pip install . --no-build-isolation
 ```
-> Note: If `pip install -e .` does not work, proceed with `pip install . --no-build-isolation` instead.
+> Note: If `pip install . --no-build-isolation` does not work, proceed with `pip install -e .` instead.
 
 This makes the environment fully ready for use.
 
