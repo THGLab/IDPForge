@@ -4,6 +4,7 @@ Copyright (c) Meta Platforms, Inc. and affiliates.
 """
 
 import typing as T
+import gc
 import time
 import torch
 import numpy as np
@@ -273,11 +274,16 @@ def output_to_pdb(
                 print(f"     [Batch Attempt {validate_attempt}] Conformer {stem}", flush=True)
 
             # --- Initial relaxation ---
+            with open(raw_path) as _raw_fp:
+                _raw_pdb_str = _raw_fp.read()
+            unrelaxed_prot = from_pdb_string(_raw_pdb_str)
+            del _raw_pdb_str
             relax_protein(
                 relax, device_str,
-                from_pdb_string(open(raw_path).read()),
+                unrelaxed_prot,
                 save_path, stem, **kwargs
             )
+            del unrelaxed_prot
             if os.path.isfile(raw_path):
                 os.remove(raw_path)
 
@@ -290,6 +296,7 @@ def output_to_pdb(
             needs_rerelax = False
 
             # 1a. Bond integrity -> find broken HIS residues
+            chk = None
             try:
                 chk = OMMPDBFile(relaxed_path)
                 broken = check_bond_integrity(chk.topology, chk.positions)
@@ -298,6 +305,9 @@ def output_to_pdb(
                               or b.get('resname2', '') in _HIS_RESNAMES}
             except Exception:
                 his_resids = set()
+            finally:
+                if chk is not None:
+                    del chk
 
             # 1b. Chirality repair
             n_chiral = repair_chirality(relaxed_path)
@@ -316,12 +326,16 @@ def output_to_pdb(
             if needs_rerelax:
                 if verbose:
                     print(f"       [RE-RELAX] Re-relaxing after repairs...", flush=True)
-                repaired_prot = from_pdb_string(open(relaxed_path).read())
+                with open(relaxed_path) as _rel_fp:
+                    _rel_pdb_str = _rel_fp.read()
+                repaired_prot = from_pdb_string(_rel_pdb_str)
+                del _rel_pdb_str
                 os.remove(relaxed_path)
                 relax_protein(
                     relax, device_str, repaired_prot,
                     save_path, stem, **kwargs
                 )
+                del repaired_prot
                 if not os.path.isfile(relaxed_path):
                     if verbose:
                         print(f"       [RE-RELAX] Failed, discarding.", flush=True)
@@ -331,6 +345,7 @@ def output_to_pdb(
 
             # --- Structural validation ---
             t0 = time.perf_counter()
+            chk = None
             try:
                 chk = OMMPDBFile(relaxed_path)
                 is_valid, info = validate_structure_post_relax(
@@ -343,6 +358,9 @@ def output_to_pdb(
                 info = {"reason": str(e), "chirality_pass": False,
                         "bonds_pass": False, "clash_pass": False,
                         "knot_pass": False}
+            finally:
+                if chk is not None:
+                    del chk
             elapsed = time.perf_counter() - t0
 
             if verbose:
@@ -390,6 +408,8 @@ def output_to_pdb(
                 if verbose:
                     print(f"       [RESULT] FAILED ({reason}) [Thresh: 10.00]", flush=True)
                 os.remove(relaxed_path)
+
+            gc.collect()
 
         return relaxed_files
 

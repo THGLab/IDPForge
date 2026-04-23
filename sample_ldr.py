@@ -1,6 +1,7 @@
 # Sampling script for local disordered regions
 # RESPECTS NO_RELAX ARG + CLEAN NAMING
 
+import gc
 import os
 import sys
 import yaml
@@ -169,6 +170,11 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
                 save_path=abs_output_dir, counter=start_idx,
                 counter_cap=nsample, viol_mask=~fold_data["mask"],
                 verbose=verbose, expected_knot_type=expected_knot_type)
+
+        del outputs, template, seq_list, ss_list, xt_list, tor_list
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         # Re-count actual files on disk (some conformers may be rejected by relaxation)
         current_count = count_done()
