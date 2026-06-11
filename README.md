@@ -237,6 +237,39 @@ docker run --rm -it --gpus all \
 ```
 Examples of this are given in later sections.
 
+## Using Apptainer
+
+The same two recipes are provided as Apptainer (formerly Singularity) definition files,
+`dockerfiles/idpforge_ampere.def` and `dockerfiles/idpforge_blackwell.def`. Build a `.sif`
+image from the root of this repository:
+```bash
+apptainer build idpforge.sif dockerfiles/idpforge_ampere.def      
+# or idpforge_blackwell.def
+```
+As with Docker, weights and data files from [Figshare](https://doi.org/10.6084/m9.figshare.28414937)
+may be merged into the repository before building so they are baked into the image; otherwise mount
+them at runtime.
+
+Running differs from Docker in a few ways: bind mounts use `-B src:dst` (not `-v`), the GPU flag is
+`--nv` (not `--gpus all`), environment variables use `--env` (not `-e`), and the application lives at
+`/opt/IDPForge` (not `/app`). The image filesystem is read-only, so outputs must go to a bound,
+writable directory. The `%runscript` is `python "$@"`, so everything after the image name is passed
+straight to Python.
+
+Example (single-chain IDP, Sic1), run from the repository root:
+```bash
+mkdir -p out
+sequence="GSMTPSTPPRSRGTRYLAQPSGNTSSSALMQGQKTPQKPSQNLVPVTPSTTKSFKNAPLLAPPNSNMGMTSPFNGLTSPQRSPFPKSSVKRT"
+apptainer run --nv \
+    -B ./weights:/opt/IDPForge/weights \
+    -B ./out:/app/out \
+    idpforge.sif /opt/IDPForge/sample_idp.py "$sequence" \
+        /opt/IDPForge/weights/mdl.ckpt /app/out /opt/IDPForge/configs/sample.yml \
+        --nconf 10 --batch 4 --cuda --verbose
+```
+For IDRs with folded domains, swap in `sample_ldr.py` with its `CKPT NPZ OUTDIR CFG` arguments and
+mount the directory holding the `.npz` template (e.g. `-B ./data:/opt/IDPForge/data`).
+
 ## Training
 
 We use `pytorch-lightning` for training and one can customize training via the documented flags under `trainer` in the config file.
@@ -302,7 +335,7 @@ docker run -it --rm --gpus all \
 
 ### IDRs with folded domains
 
-First, to prepare the folded template, run `python init_ldr_template.py`. We provide an example for sampling the low confidence region of AF entry P05231:
+First, prepare the folded template with `mk_ldr_template.py` (shown below). We provide an example for sampling the low confidence region of AF entry P05231:
 ```bash
 python mk_ldr_template.py data/AF-P05231-F1-model_v4.pdb 1-41 data/AF-P05231_ndr.npz
 ```
@@ -331,10 +364,85 @@ docker run -it --rm --gpus all \
 
 We use UCBShift for chemical shift prediction and can be installed at https://github.com/THGLab/CSpred.git. If you wish to use X-EISD for evaluation or reweighing with experimental data, please refer to https://github.com/THGLab/X-EISDv2.
 
+#### Integrated X-EISD scorer (`score_ensemble.py`)
+
+`score_ensemble.py` scores a PDB ensemble against experimental data: it back-calculates the requested
+observables and reports per-property MAE and X-EISD log-likelihood (utilities live in `scoring/`).
+
+```bash
+# default: 30 trials of 100-conformer subsamples -> scores_trials.csv (the benchmark protocol)
+python score_ensemble.py PROTEIN path/to/ensemble_dir --jc --noe --pre --fret [--force]
+# --all: score every conformer in one pass -> scores_all.csv (quick test-case scoring)
+python score_ensemble.py PROTEIN path/to/ensemble_dir --jc --noe --pre --fret --all
+```
+
+The default 30×100 run produces `scores_trials.csv` (the file `--normalize` consumes); `--all`
+writes a separate `scores_all.csv`. J-couplings, NOE, PRE, and smFRET need only Biopython.
+Experimental data is read from `../Data/exp/{protein}/`, overridable via `IDPFORGE_EXP_DATA`.
+
+**Chemical shifts (`--cs`) require CSpred (UCBShift).** CSpred has its own dependency stack, so it
+must live in a separate environment; the scorer calls it once per conformer as a subprocess rather
+than importing it. To enable `--cs`:
+
+1. Clone and install CSpred (https://github.com/THGLab/CSpred.git) into its own conda environment,
+   following that repository's instructions.
+2. Point the scorer at that environment's interpreter and the CSpred entry point, then run `--cs`:
+   ```bash
+   export CSPRED_PYTHON=/path/to/envs/cspred/bin/python   # interpreter with CSpred installed
+   export CSPRED_PATH=/path/to/CSpred/CSpred.py           # default: ../Scoring/CSpred/CSpred.py
+   python score_ensemble.py PROTEIN path/to/ensemble_dir --cs
+   ```
+
+Pass `--normalize` to build the cross-method Eq. S11 benchmark table. Methods are the immediate
+subdirectories of `--ens-base` (layout `{ens_base}/{method}/{protein}/scores_trials.csv`); use
+`--score-file` to aggregate a different per-protein CSV:
+
+```bash
+python score_ensemble.py --normalize --ens-base DIR [--score-file scores_trials.csv] [--outdir DIR] [--rg-json FILE]
+```
+
+The `%|dRg|/Rg` column compares each ensemble's Rg to an experimental target. Because only proteins
+with NMR data are X-EISD-scored, ensemble Rg is computed by the `--rg` mode (mass-weighted all-atom Rg,
+same 30×100 protocol → `{method}/{protein}/rg_trials.csv`), so the column also covers proteins that
+have an exp Rg target but no NMR data. Run `--rg` before `--normalize`, and pass the exp targets via
+`--rg-json` (JSON `{"exp_rg": {protein: [mean, err]}}`):
+
+```bash
+python score_ensemble.py --rg --ens-base DIR                              # writes rg_trials.csv per ensemble
+python score_ensemble.py --normalize --ens-base DIR --rg-json exp_rg.json
+```
+
+#### Running the scorer in a container
+
+The scorer is included in both images, but experimental data is **not** bundled — mount your
+`Data/exp` tree and point `IDPFORGE_EXP_DATA` at it. Scoring is CPU-only, so GPU flags are optional.
+J-couplings, NOE, PRE, and smFRET work out of the box; `--cs` additionally needs a CSpred
+environment, which is not in the image.
+
+Docker:
+```bash
+docker run --rm -it \
+    -v "./out":/app/output \
+    -v "../Data/exp":/data -e IDPFORGE_EXP_DATA=/data \
+    -w /app idpforge:latest \
+    python -u /app/score_ensemble.py PROTEIN /app/output --jc --noe --pre --fret
+```
+
+Apptainer:
+```bash
+apptainer run \
+    -B ./out:/app/output \
+    -B ../Data/exp:/data --env IDPFORGE_EXP_DATA=/data \
+    idpforge.sif /opt/IDPForge/score_ensemble.py PROTEIN /app/output --jc --noe --pre --fret
+```
+Replace `PROTEIN` with a name that has a subdirectory under `Data/exp/` (pass only the flags whose
+experimental files exist for it), and point the ensemble argument (`/app/output`) at the directory
+of relaxed PDBs produced by sampling.
+
 ## Citation
 ```bibtex
-@article {DeCastro2026,
-	author = {De Castro, Stefano and Zhang, Oufan and Liu, Zi Hao and Forman-Kay, Julie Deborah and Head-Gordon, Teresa},
+@article {Zhang2026,
+	author = {Zhang, Oufan and Liu, Zi Hao and Forman-Kay, Julie Deborah and Head-Gordon, Teresa},
 	title = {IDPForge: Deep Learning of Proteins with Global and Local Regions of Disorder},
 	elocation-id = {2026.03.25.714313},
 	year = {2026},

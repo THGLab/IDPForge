@@ -16,6 +16,12 @@ From: nvidia/cuda:12.8.0-devel-ubuntu22.04
 #       idpforge.sif /opt/IDPForge/sample_idp.py \
 #           "$SEQ" /opt/IDPForge/weights/mdl.ckpt /app/out \
 #           /opt/IDPForge/configs/sample.yml --nconf 10 --cuda --verbose
+#
+# Scoring (score_ensemble.py) is included, but experimental data is not bundled:
+# mount it and set IDPFORGE_EXP_DATA, e.g.
+#   apptainer run --nv -B "$PWD/../Data/exp":/data --env IDPFORGE_EXP_DATA=/data \
+#       idpforge.sif /opt/IDPForge/score_ensemble.py asyn /app/out --jc --noe --pre --fret
+# --cs (CSpred) needs an external tool that is not in this image.
 
 %files
     .gitignore          /opt/IDPForge/.gitignore
@@ -33,6 +39,8 @@ From: nvidia/cuda:12.8.0-devel-ubuntu22.04
     relax_raw.py        /opt/IDPForge/relax_raw.py
     sample_idp.py       /opt/IDPForge/sample_idp.py
     sample_ldr.py       /opt/IDPForge/sample_ldr.py
+    score_ensemble.py   /opt/IDPForge/score_ensemble.py
+    scoring             /opt/IDPForge/scoring
     setup.py            /opt/IDPForge/setup.py
     train.py            /opt/IDPForge/train.py
     weights             /opt/IDPForge/weights
