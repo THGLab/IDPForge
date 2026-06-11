@@ -87,17 +87,14 @@ class IDPForge(nn.Module):
         inplace_safe: bool = False,
         use_potential: bool =False
     ):
-        """Runs a forward pass given input tokens. 
+        """Run a forward pass.
 
         Args:
-            aa (torch.Tensor): Tensor containing indices corresponding to amino acids. Indices match
-                openfold.np.residue_constants.restype_order_with_x.
-            ss (torch.Tensor): Tensor containing indices corresponding to secondary structure.
-            mask (torch.Tensor): Binary tensor with 1 meaning position is unmasked and 0 meaning position is masked.
-            residx (torch.Tensor): Residue indices of amino acids. Will assume contiguous if not provided.
-                ESMFold sometimes produces different samples when different masks are provided.
-            num_recycles (int): How many recycle iterations to perform. If None, defaults to training max
-                recycles, which is 3.
+            t: diffusion timestep indices.
+            alpha_t: per-residue torsion features at step t.
+            x_t: noised backbone coordinates at step t.
+            batch: dict with 'sequence', 'ss', 'mask', 'resi'.
+            num_recycles: recycle iterations (defaults to training max of 3).
         """
         device = self.device
         aa, ss, mask, residx = batch["sequence"], batch["ss"], batch["mask"], batch["resi"]
@@ -134,7 +131,6 @@ class IDPForge(nn.Module):
         structure: dict = self.trunk(
             s_s_0, s_z_0, aa, residx, mask, no_recycles=num_recycles
         )
-        # Documenting what we expect:
         structure = {
             k: v for k, v in structure.items()
             if k in [
@@ -252,9 +248,6 @@ class IDPForge(nn.Module):
                 template_cfg=template_cfgs,
         )
         
-        # deal with artificial linkers for multi-chains
-        #output["backbone_exists"] *= linker_mask.to(self.device).unsqueeze(2)
-        #output["chain_index"] = chain_index
         out = {"positions": output["positions"][-1].detach().cpu().float()}
         for k in ["aatype", "residue_index", "atom14_atom_exists", 
                   "atom37_atom_exists", "residx_atom37_to_atom14", "residx_atom14_to_atom37"]:

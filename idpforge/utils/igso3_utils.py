@@ -15,8 +15,7 @@ import torch
 from scipy.spatial.transform import Rotation
 import scipy.linalg
 
-#https://github.com/RosettaCommons/RFdiffusion.git
-#Define geometric operations on the SO3 manifold
+# Geometric operations on the SO(3) manifold
 
 # hat map from vector space R^3 to Lie algebra so(3)
 def hat(v):

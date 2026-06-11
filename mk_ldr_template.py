@@ -1,6 +1,4 @@
 # Auxilary file for preparing the LDR inputs
-# created by OZ, 1/8/25
-# modified by SDC, 3/12/26
 
 import numpy as np
 import mdtraj as md
@@ -98,8 +96,8 @@ def main(pdb, disorder_idx, nsample):
     dssp = md.compute_dssp(traj, simplified=True)[0]
     phis = md.compute_phi(traj)[1][0]
     psis = md.compute_psi(traj)[1][0]
-    phis = np.concatenate(([-180], np.degrees(phis)))
-    psis = np.concatenate((np.degrees(psis), [180]))
+    phis = np.concatenate(([-np.pi], phis))
+    psis = np.concatenate((psis, [np.pi]))
     rama = assign_rama(np.stack([phis, psis], axis=-1))
     encode = "".join([dssp[i] if dssp[i] in ["H", "E"] else rama[i] for i in range(len(dssp))])
     atom_mask = crd.sum(axis=-1) == 0
@@ -133,7 +131,7 @@ def main(pdb, disorder_idx, nsample):
     
     d = est_distance(len(disorder_idx_list))
     
-    batch_multiplier = 10 # Start by sampling 10x more than needed
+    batch_multiplier = 10
     max_tries = 10
     tries = 0
     

@@ -1,6 +1,4 @@
 # Auxilary file for preparing the LDR inputs with flexible domains
-# created by OZ, 1/8/25
-# modified by SDC, 3/12/26
 
 import numpy as np
 import mdtraj as md
@@ -154,9 +152,9 @@ def main(input_pdb, disorder_idx, nsample, **kwargs):
     dssp = md.compute_dssp(traj, simplified=True)[0]
     phis = md.compute_phi(traj)[1][0]
     psis = md.compute_psi(traj)[1][0]
-    phis = np.concatenate(([-180], np.degrees(phis)))
-    psis = np.concatenate((np.degrees(psis), [180]))
-    
+    phis = np.concatenate(([-np.pi], phis))
+    psis = np.concatenate((psis, [np.pi]))
+
     rama = assign_rama(np.stack([phis, psis], axis=-1))
     encode = "".join([dssp[i] if dssp[i] in ["H", "E"] else rama[i] for i in range(len(dssp))])
 
@@ -188,7 +186,7 @@ def main(input_pdb, disorder_idx, nsample, **kwargs):
     
     # --- 3. Generate Multiple Domain Orientations ---
     new_coords = np.tile(crd, (nsample, 1, 1, 1))
-    atom_mask = new_coords.sum(axis=-1) == 0 # This is now 3D
+    atom_mask = new_coords.sum(axis=-1) == 0
     
     print(f"       Generating {nsample} random domain orientations (min_dist=3.8)...", flush=True)
     for i in range(nsample):

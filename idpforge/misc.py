@@ -36,17 +36,13 @@ _JUNCTION_CA_THRESHOLD = 6.46  # CA-CA (~3.8 A) + 2x C-N peptide bond (1.33 A)
 
 def _check_junction_distances(atom_positions, viol_mask, threshold=_JUNCTION_CA_THRESHOLD):
     """
-    Check CA-CA distances at IDR↔folded boundaries.
-
-    When sample_ldr.py generates IDR conformations with folded regions frozen
-    to template coordinates, the diffused IDR endpoints can land too far from
-    the adjacent folded residues.  This pre-relaxation filter rejects those
-    conformers early, saving wasted relaxation compute.
+    Check CA-CA distances at IDR/folded boundaries; reject conformers whose
+    IDR endpoints land too far from the adjacent folded residues before relaxation.
 
     Args:
         atom_positions: [L, 37, 3] atom37 coordinates (numpy).
         viol_mask: [L] boolean array — True = IDR, False = folded.
-        threshold: Max allowed CA-CA distance in Angstroms (default 5.0).
+        threshold: Max allowed CA-CA distance in Angstroms.
 
     Returns:
         (passes, details):

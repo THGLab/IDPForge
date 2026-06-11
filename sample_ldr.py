@@ -1,5 +1,4 @@
-# Sampling script for local disordered regions
-# RESPECTS NO_RELAX ARG + CLEAN NAMING
+# Sampling script for local disordered regions (LDR) + folded template.
 
 import gc
 import os
@@ -29,15 +28,7 @@ old_params = ["trunk.structure_module.ipa.linear_q_points.weight", "trunk.struct
 seed_everything(42)
 
 def combine_sec(fold_ss, idr_ss, mask):
-    idr_counter = 0
-    ss = ""
-    for fs, m in zip(fold_ss, mask):
-        if m:
-            ss += fs
-        else:
-            ss += idr_ss[idr_counter]
-            idr_counter += 1
-    return ss
+    return "".join(fold_ss[i] if m else idr_ss[i] for i, m in enumerate(mask))
 
 def main(ckpt_path, fold_template, output_dir, sample_cfg,
         batch_size=32, nsample=200, attn_chunk_size=None,
@@ -109,8 +100,9 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
         # We look for raw files to count progress
         search_pattern = "*_raw.pdb"
     else:
-        relax_config = settings["relax"] 
-        relax_config["exclude_residues"] = np.where(fold_data["mask"])[0].tolist()
+        relax_config = settings["relax"]
+        # exclude_residues = residues EXCLUDED from the harmonic position restraint
+        relax_config["exclude_residues"] = np.where(~fold_data["mask"])[0].tolist()
         relax_opts = mlc.ConfigDict(relax_config)
         search_pattern = "*_validated.pdb"
 

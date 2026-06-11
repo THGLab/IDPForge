@@ -1,19 +1,5 @@
-"""
-idpforge/utils/structure_validation.py
-
-Structural validation utilities for protein conformers.
-
-Features:
-- CHIRALITY: Checks for D-amino acids using scalar triple product of N, CA, C, CB.
-- BONDS: Verifies all covalent bonds are intact (distance < 2.2 Å).
-- CLASHES: Backbone-Backbone clash detection with IDR-aware filtering.
-- TOPOLOGY: Hybrid Protocol (Topoly Native Implementation).
-    1. Alexander Gatekeeper (Probabilistic):
-       - Uses native 'tries=100' argument.
-       - Threshold 0.65 prevents "borderline" knots from slipping through.
-    2. HOMFLY Fallback (Deterministic):
-       - Uses Closure.MASS_CENTER to avoid false positives (phantom knots).
-"""
+"""Structural validation utilities for protein conformers: chirality, bond
+integrity, backbone clash detection, and Alexander/HOMFLY knot topology."""
 
 from __future__ import annotations
 import json
@@ -36,8 +22,7 @@ VDW_RADII = {'C': 1.70, 'N': 1.55, 'O': 1.52, 'S': 1.80, 'P': 1.80, 'H': 1.20}
 
 # AlphaKnot2 Hybrid Settings
 ALEXANDER_TRIES        = 100
-# Thresholds for Alexander Gatekeeper
-# 0.65 = Must match unknot in 65/100 projections to exit early.
+# 0.65 => unknot in >=65/100 projections to exit early
 ALPHAKNOT_P_UNKNOT_MAX = 0.65
 
 _KNOT_RE = re.compile(r"HOMFLY_Knot\((.+)\)")
@@ -189,8 +174,6 @@ def check_clashes_detailed(topology, positions, overlap_cutoff=0.4, idr_start=No
     bb_res_ids = []
     bb_chain_ids = []
 
-    # Pre-fetch radii (using simple dictionary lookup)
-    # Note: Carbon (C) radius ~1.70A, Nitrogen (N) ~1.55A
     def get_r(elem): return VDW_RADII.get(elem, 1.70)
 
     for i, atom in enumerate(atoms):
@@ -238,7 +221,7 @@ def check_clashes_detailed(topology, positions, overlap_cutoff=0.4, idr_start=No
         dist = np.linalg.norm(coords[i] - coords[j])
         overlap = (radii[i] + radii[j]) - dist
 
-        # We are counting ERRORS, so Overlap >= cutoff is BAD.
+        # overlap >= cutoff counts as a clash
         if overlap >= overlap_cutoff:
             clash_count += 1
 
