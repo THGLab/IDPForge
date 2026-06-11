@@ -13,8 +13,7 @@ def calc_norm(s, eps=1e-8, max_clamp=None, keepdim=False):
                             min=eps, max=max_clamp))
 
 # credit https://github.com/RosettaCommons/RFdiffusion.git
-# More complicated version splits error in CA-N and CA-C (giving more accurate CB position)
-# It returns the rigid transformation from local frame to global frame
+# Returns the rigid transform from local to global frame given N, Ca, C.
 def rigid_from_3_points(xyz, eps=1e-8):
     # N, Ca, C - [B, L, 3]
     # R - [B, L, 3, 3], det(R)=1, inv(R) = R.T, R is a rotation matrix

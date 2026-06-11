@@ -184,11 +184,17 @@ class IDPForgeWrapper(pl.LightningModule):
             if k in output:
                 out[k] = output[k].detach().cpu().long()
 
-        pdb = output_to_pdb(out, select_idx=[0])[0]
-        pdbname = f"{self.trainer.current_epoch}_train{batch_idx + 1}_pred{batch['T'][0, 0]}.pdb" if train else f"{self.trainer.current_epoch}_val{batch_idx + 1}.pdb"
-        pdb_out = os.path.join(self.pdb_dir, pdbname)
-        with open(pdb_out, "w") as f:
-            f.write(pdb)
+        pdbs = output_to_pdb(out, select_idx=[0])
+        if not pdbs:
+            print(f"[_log_pdbs] sample 0 at epoch {self.trainer.current_epoch} "
+                  f"batch {batch_idx + 1} had NaN/invalid coordinates; "
+                  f"skipping predicted PDB write")
+        else:
+            pdb = pdbs[0]
+            pdbname = f"{self.trainer.current_epoch}_train{batch_idx + 1}_pred{batch['T'][0, 0]}.pdb" if train else f"{self.trainer.current_epoch}_val{batch_idx + 1}.pdb"
+            pdb_out = os.path.join(self.pdb_dir, pdbname)
+            with open(pdb_out, "w") as f:
+                f.write(pdb)
                 
         pdbname = f"{self.trainer.current_epoch}_train{batch_idx + 1}_true.pdb" if train else f"val{batch_idx + 1}_true.pdb"
         if train or not os.path.exists(os.path.join(self.pdb_dir, pdbname)):

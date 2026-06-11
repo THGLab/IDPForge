@@ -12,6 +12,8 @@ Alongside the scripts, the `Data_Inputs` directory contains the following resour
 
 3. `Test_Structures/O14653.pdb` is a sample Category 3 case that can be run as a test for each step.
 
+4. `knot_screening.json` is a JSON dictionary confirming the knot presence/absence (`label`) and native knot type (`closure_polys`) for each protein containing a folded domain. This was pre-calculated using the predictions for all proteins containing one or more folded domains in the AlphaFold2 9606 Human v4 database as they are used as templates during conformer generation. Topology checks during structure validation aim to match the native knot type of the protein being generated, defaulting to `Unknot` in the event that one is not found.
+
 # Running AFX-IDPForge Scripts
 
 For testing purposes, a Category 3 protein (`ID: O14653`) is chosen.

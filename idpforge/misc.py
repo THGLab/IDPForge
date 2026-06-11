@@ -4,6 +4,7 @@ Copyright (c) Meta Platforms, Inc. and affiliates.
 """
 
 import typing as T
+import gc
 import time
 import torch
 import numpy as np
@@ -25,7 +26,43 @@ from idpforge.utils.definitions import (
     coil_types, coil_sample_probs,
 )
 from idpforge.utils.np_utils import calc_rg, assign_rama
-            
+
+
+# ============================================================
+# JUNCTION DISTANCE FILTER
+# ============================================================
+_JUNCTION_CA_THRESHOLD = 6.46  # CA-CA (~3.8 A) + 2x C-N peptide bond (1.33 A)
+
+
+def _check_junction_distances(atom_positions, viol_mask, threshold=_JUNCTION_CA_THRESHOLD):
+    """
+    Check CA-CA distances at IDR/folded boundaries; reject conformers whose
+    IDR endpoints land too far from the adjacent folded residues before relaxation.
+
+    Args:
+        atom_positions: [L, 37, 3] atom37 coordinates (numpy).
+        viol_mask: [L] boolean array — True = IDR, False = folded.
+        threshold: Max allowed CA-CA distance in Angstroms.
+
+    Returns:
+        (passes, details):
+            passes — True if ALL boundary CA-CA distances are within threshold.
+            details — list of dicts with idr_res, fold_res, distance, pass.
+    """
+    CA_IDX = 1  # CA atom index in atom37 format
+    details = []
+    for i in range(len(viol_mask) - 1):
+        if viol_mask[i] != viol_mask[i + 1]:
+            ca_i = atom_positions[i, CA_IDX]
+            ca_j = atom_positions[i + 1, CA_IDX]
+            dist = float(np.linalg.norm(ca_i - ca_j))
+            idr_res = i if viol_mask[i] else i + 1
+            fold_res = i + 1 if viol_mask[i] else i
+            details.append({
+                "idr_res": idr_res, "fold_res": fold_res,
+                "distance": dist, "pass": dist <= threshold,
+            })
+    return all(d["pass"] for d in details), details
 
 
 def onehot_to_ss(tokens, mask):
@@ -103,6 +140,7 @@ def output_to_pdb(
     counter=1,
     counter_cap=None,
     verbose=False,
+    expected_knot_type=None,
     **kwargs
 ):
     """
@@ -127,6 +165,9 @@ def output_to_pdb(
 
     written_files = []
     file_idx = counter
+
+    # Junction distance filter: extract viol_mask (do NOT pop — relax_protein needs it)
+    viol_mask = kwargs.get("viol_mask", None)
 
     # Build set of indices that already have validated files (to skip gaps only)
     existing_indices = set()
@@ -153,6 +194,31 @@ def output_to_pdb(
         pred_pos = final_atom_positions[i]
         mask = final_atom_mask[i]
         resid = output["residue_index"][i] + 1  # preserve numbering
+
+        # --- NaN coordinate filter ---
+        if np.isnan(pred_pos).any():
+            if verbose:
+                print(f"       [NaN] Conformer {file_idx} has NaN coordinates, skipping.", flush=True)
+            continue
+
+        # --- Junction distance filter (pre-relaxation) ---
+        if viol_mask is not None:
+            junc_pass, junc_details = _check_junction_distances(pred_pos, viol_mask)
+            if not junc_pass:
+                if verbose:
+                    for d in junc_details:
+                        status = "OK" if d["pass"] else "FAIL"
+                        print(f"       [JUNCTION] res {d['idr_res']+1}(IDR) <-> "
+                              f"res {d['fold_res']+1}(fold): "
+                              f"CA-CA = {d['distance']:.2f} A  [{status}]", flush=True)
+                    print(f"       [JUNCTION] Conformer {file_idx} rejected "
+                          f"(boundary > {_JUNCTION_CA_THRESHOLD} A)", flush=True)
+                continue  # do NOT increment file_idx — next conformer reuses this slot
+            elif verbose:
+                for d in junc_details:
+                    print(f"       [JUNCTION] res {d['idr_res']+1}(IDR) <-> "
+                          f"res {d['fold_res']+1}(fold): "
+                          f"CA-CA = {d['distance']:.2f} A  [OK]", flush=True)
 
         # Build full atom37 protein object
         pred = OFProtein(
@@ -204,11 +270,16 @@ def output_to_pdb(
                 print(f"     [Batch Attempt {validate_attempt}] Conformer {stem}", flush=True)
 
             # --- Initial relaxation ---
+            with open(raw_path) as _raw_fp:
+                _raw_pdb_str = _raw_fp.read()
+            unrelaxed_prot = from_pdb_string(_raw_pdb_str)
+            del _raw_pdb_str
             relax_protein(
                 relax, device_str,
-                from_pdb_string(open(raw_path).read()),
+                unrelaxed_prot,
                 save_path, stem, **kwargs
             )
+            del unrelaxed_prot
             if os.path.isfile(raw_path):
                 os.remove(raw_path)
 
@@ -221,6 +292,7 @@ def output_to_pdb(
             needs_rerelax = False
 
             # 1a. Bond integrity -> find broken HIS residues
+            chk = None
             try:
                 chk = OMMPDBFile(relaxed_path)
                 broken = check_bond_integrity(chk.topology, chk.positions)
@@ -229,6 +301,9 @@ def output_to_pdb(
                               or b.get('resname2', '') in _HIS_RESNAMES}
             except Exception:
                 his_resids = set()
+            finally:
+                if chk is not None:
+                    del chk
 
             # 1b. Chirality repair
             n_chiral = repair_chirality(relaxed_path)
@@ -247,12 +322,16 @@ def output_to_pdb(
             if needs_rerelax:
                 if verbose:
                     print(f"       [RE-RELAX] Re-relaxing after repairs...", flush=True)
-                repaired_prot = from_pdb_string(open(relaxed_path).read())
+                with open(relaxed_path) as _rel_fp:
+                    _rel_pdb_str = _rel_fp.read()
+                repaired_prot = from_pdb_string(_rel_pdb_str)
+                del _rel_pdb_str
                 os.remove(relaxed_path)
                 relax_protein(
                     relax, device_str, repaired_prot,
                     save_path, stem, **kwargs
                 )
+                del repaired_prot
                 if not os.path.isfile(relaxed_path):
                     if verbose:
                         print(f"       [RE-RELAX] Failed, discarding.", flush=True)
@@ -262,17 +341,22 @@ def output_to_pdb(
 
             # --- Structural validation ---
             t0 = time.perf_counter()
+            chk = None
             try:
                 chk = OMMPDBFile(relaxed_path)
                 is_valid, info = validate_structure_post_relax(
                     chk.topology, chk.positions, pdb_path=relaxed_path,
-                    full_report=True
+                    full_report=True,
+                    expected_knot_type=expected_knot_type
                 )
             except Exception as e:
                 is_valid = False
                 info = {"reason": str(e), "chirality_pass": False,
                         "bonds_pass": False, "clash_pass": False,
                         "knot_pass": False}
+            finally:
+                if chk is not None:
+                    del chk
             elapsed = time.perf_counter() - t0
 
             if verbose:
@@ -289,7 +373,17 @@ def output_to_pdb(
                 chiral_str = "PASS" if chiral_pass else "FAIL (D-Amino detected)"
                 bonds_str = "PASS" if bonds_pass else f"FAIL ({n_broken} broken)"
                 clash_str = "PASS" if clash_pass else "FAIL"
-                knot_str = "PASS" if knot_pass else f"FAIL ({knot_type})"
+
+                if expected_knot_type is not None:
+                    detected = info.get("detected_knot_type")
+                    disp = info.get("expected_knot_display") or str(expected_knot_type)
+                    if knot_pass:
+                        knot_str = f"PASS (native {disp})"
+                    else:
+                        fail_reason = info.get("knot_fail_reason", "")
+                        knot_str = f"FAIL (expected {disp}, got {detected}) [{fail_reason}]"
+                else:
+                    knot_str = "PASS" if knot_pass else f"FAIL ({knot_type})"
 
                 print(f"       [TIMING] Validation: {elapsed:.2f}s", flush=True)
                 print(f"       [POST-MIN CHECK] Validation Results", flush=True)
@@ -310,6 +404,8 @@ def output_to_pdb(
                 if verbose:
                     print(f"       [RESULT] FAILED ({reason}) [Thresh: 10.00]", flush=True)
                 os.remove(relaxed_path)
+
+            gc.collect()
 
         return relaxed_files
 

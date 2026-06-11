@@ -1,7 +1,4 @@
-"""
-Dataloader
-created by OZ, 11/12/24
-"""
+"""Dataloader."""
 
 import os.path
 import torch

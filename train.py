@@ -1,7 +1,4 @@
-"""
-Script to run training of IDPForge
-created by OZ, 11/12/24
-"""
+"""Script to run training of IDPForge."""
 
 import os
 import numpy as np
@@ -54,7 +51,6 @@ def main(args):
     if args.load_weights_only:
         sd = torch.load(args.resume_from_ckpt, map_location="cpu")
         model.load_state_dict(sd["state_dict"])
-        #model.ema.load_state_dict(sd["ema"])
         print("Loading model weights from", args.resume_from_ckpt)
     else:
         ckpt_path = args.resume_from_ckpt

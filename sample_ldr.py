@@ -1,6 +1,6 @@
-# Sampling script for local disordered regions
-# RESPECTS NO_RELAX ARG + CLEAN NAMING
+# Sampling script for local disordered regions (LDR) + folded template.
 
+import gc
 import os
 import sys
 import yaml
@@ -9,7 +9,7 @@ import numpy as np
 import pickle
 import pandas as pd
 import random
-import pkg_resources
+from importlib.metadata import version
 import time
 from glob import glob
 
@@ -28,19 +28,12 @@ old_params = ["trunk.structure_module.ipa.linear_q_points.weight", "trunk.struct
 seed_everything(42)
 
 def combine_sec(fold_ss, idr_ss, mask):
-    idr_counter = 0
-    ss = ""
-    for fs, m in zip(fold_ss, mask):
-        if m:
-            ss += fs
-        else:
-            ss += idr_ss[idr_counter]
-            idr_counter += 1
-    return ss
+    return "".join(fold_ss[i] if m else idr_ss[i] for i, m in enumerate(mask))
 
 def main(ckpt_path, fold_template, output_dir, sample_cfg,
         batch_size=32, nsample=200, attn_chunk_size=None,
-        device="cpu", ss_db_path=None, no_relax=False, verbose=False):
+        device="cpu", ss_db_path=None, no_relax=False, verbose=False,
+        expected_knot_type=None):
 
     # 1. Load Config
     print(f"[ldr] Loading Config: {sample_cfg}", flush=True)
@@ -64,7 +57,7 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
     # 4. Load Weights
     print(f"[ldr] Loading Weights...", flush=True)
     pl_sd = torch.load(ckpt_path, map_location="cpu")
-    if int(pkg_resources.get_distribution("openfold").version[0]) > 1:
+    if int(version("openfold").split(".")[0]) > 1:
         sd = {k.replace("points.", "points.linear.") if k in old_params else k: v for k, v in pl_sd["ema"]["params"].items()}
     else:
         sd = {k: v for k, v in pl_sd["ema"]["params"].items()}
@@ -107,8 +100,9 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
         # We look for raw files to count progress
         search_pattern = "*_raw.pdb"
     else:
-        relax_config = settings["relax"] 
-        relax_config["exclude_residues"] = np.where(fold_data["mask"])[0].tolist()
+        relax_config = settings["relax"]
+        # exclude_residues = residues EXCLUDED from the harmonic position restraint
+        relax_config["exclude_residues"] = np.where(~fold_data["mask"])[0].tolist()
         relax_opts = mlc.ConfigDict(relax_config)
         search_pattern = "*_validated.pdb"
 
@@ -167,7 +161,12 @@ def main(ckpt_path, fold_template, output_dir, sample_cfg,
         output_to_pdb(outputs, relax=relax_opts,
                 save_path=abs_output_dir, counter=start_idx,
                 counter_cap=nsample, viol_mask=~fold_data["mask"],
-                verbose=verbose)
+                verbose=verbose, expected_knot_type=expected_knot_type)
+
+        del outputs, template, seq_list, ss_list, xt_list, tor_list
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         # Re-count actual files on disk (some conformers may be rejected by relaxation)
         current_count = count_done()
@@ -188,10 +187,31 @@ if __name__ == "__main__":
     parser.add_argument('--ss_db', default=None, type=str)
     parser.add_argument('--no_relax', action="store_true", help="Skip relaxation (outputs raw pdb)")
     parser.add_argument('--verbose', action="store_true", help="Print structural validation details")
+    parser.add_argument('--expected_knot_type', default=None, type=str,
+                        help="Per-domain knot spec as a JSON string "
+                             '(e.g. \'[{"range":[65,280],"knot":null},'
+                             '{"range":[320,450],"knot":"3_1"}]\'). '
+                             "An empty list means no topological constraint. "
+                             "Omit the flag to apply the legacy full-chain unknot baseline.")
 
     args = parser.parse_args()
 
     device = "cuda" if args.cuda and torch.cuda.is_available() else "cpu"
+
+    # Parse the per-domain spec JSON at the CLI boundary; hand a Python
+    # list (or None) to main() so downstream code never has to deal with
+    # the string form.
+    expected_spec = None
+    if args.expected_knot_type is not None:
+        import json as _json
+        try:
+            expected_spec = _json.loads(args.expected_knot_type)
+        except _json.JSONDecodeError as exc:
+            sys.exit(f"[ldr] ERROR: --expected_knot_type must be valid JSON "
+                     f"(got {args.expected_knot_type!r}): {exc}")
+        if not isinstance(expected_spec, list):
+            sys.exit(f"[ldr] ERROR: --expected_knot_type JSON must be a list, "
+                     f"got {type(expected_spec).__name__}")
 
     main(args.ckpt_path, args.fold_input, args.out_dir, args.sample_cfg,
          args.batch, args.nconf,
@@ -199,4 +219,5 @@ if __name__ == "__main__":
          device=device,
          ss_db_path=args.ss_db,
          no_relax=args.no_relax,
-         verbose=args.verbose)
+         verbose=args.verbose,
+         expected_knot_type=expected_spec)

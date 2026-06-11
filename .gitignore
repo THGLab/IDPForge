@@ -25,19 +25,23 @@ esm/dev
 local/
 weights/
 
-# Cluster Ouputs #
+# Cluster Outputs #
 submit*.slurm
 submit*.sh
 slurm_logs/
 slurm*.out
 *.ipynb
+*.sh
 
 # Dev #
 aflex.py
 test_idp.py
-configs/aflex_ldr.yml
+configs/misc_configs/*
 data/example_*
 data/diff_igso3.pkl
+data/6_LDRs/*
+data/usable_LDRs/*
+cullin1_stitch.py
 
 # Data & Outputs #
 ##################
@@ -48,6 +52,7 @@ Testing/
 AlphaFlex/Pipeline_Outputs/
 AlphaFlex/Analysis/
 AlphaFlex/Data_Inputs/AF2_*/
+Figure_Making/
 .claude/
 CLAUDE.md
 

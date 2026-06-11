@@ -93,7 +93,10 @@ except ImportError:
 # --- Shared Utility Imports (same as Step 3) ---
 from utils.smart_scoring import get_smart_threshold
 from idpforge.utils.structure_repair import repair_chirality, fix_histidine_naming
-from idpforge.utils.structure_validation import validate_structure_post_relax, check_bond_integrity
+from idpforge.utils.structure_validation import (
+    validate_structure_post_relax, check_bond_integrity, load_knot_screening,
+    format_domain_spec
+)
 # ---
 
 # --- Stitch Utility Imports ---
@@ -177,7 +180,7 @@ def relax_with_established_method(structure, output_filepath, idr_indices=None, 
 # ----------------------------------
 
 # --- Main Processing Function ---
-def process_protein(protein_id, labeled_db, id_to_pdb_path, conformer_root_dir, output_dir, final_output_root, num_conformers, length_ref=None, verbose=False, **kwargs):
+def process_protein(protein_id, labeled_db, id_to_pdb_path, conformer_root_dir, output_dir, final_output_root, num_conformers, length_ref=None, verbose=False, knot_screening=None, **kwargs):
     """
     Orchestrates the assembly pipeline for a single protein.
 
@@ -313,8 +316,16 @@ def process_protein(protein_id, labeled_db, id_to_pdb_path, conformer_root_dir, 
     region_resids = build_region_resids(ldr_infos)
     _HIS_RESNAMES = {'HIS', 'HID', 'HIE', 'HIP'}
 
+    # Look up expected knot type from pre-computed screening
+    expected_knot_type = None
+    if knot_screening:
+        expected_knot_type = knot_screening.get(protein_id)
+
     # Loop
     if verbose:
+        if expected_knot_type is not None:
+            print(f"  [Topology] Native spec: {format_domain_spec(expected_knot_type)} "
+                  f"(each folded domain's knot must match)")
         print(f"  Generating {num_conformers} conformers ({mode})...")
         print(f"  [Resume] Found {existing_final} in final, {max_temp_idx} in temp. Starting at {done+1}.")
 
@@ -441,7 +452,8 @@ def process_protein(protein_id, labeled_db, id_to_pdb_path, conformer_root_dir, 
                 idr_start=idr_start_res,
                 idr_end=idr_end_res,
                 verbose=False,
-                full_report=True
+                full_report=True,
+                expected_knot_type=expected_knot_type
             )
 
             if verbose:
@@ -449,7 +461,17 @@ def process_protein(protein_id, labeled_db, id_to_pdb_path, conformer_root_dir, 
                 chiral_str = "PASS" if info.get("chirality_pass", True) else "FAIL"
                 bonds_str = "PASS" if info.get("bonds_pass", True) else f"FAIL ({info.get('num_broken_bonds', 0)} broken)"
                 clash_str = "PASS" if info.get("clash_pass", True) else "FAIL"
-                knot_str = "PASS" if info.get("knot_pass", True) else f"FAIL ({info.get('knot_type')})"
+
+                if expected_knot_type is not None:
+                    detected = info.get("detected_knot_type")
+                    disp = info.get("expected_knot_display") or format_domain_spec(expected_knot_type)
+                    if info.get("knot_pass", True):
+                        knot_str = f"PASS (native {disp})"
+                    else:
+                        fail_reason = info.get("knot_fail_reason", "")
+                        knot_str = f"FAIL (expected {disp}, got {detected}) [{fail_reason}]"
+                else:
+                    knot_str = "PASS" if info.get("knot_pass", True) else f"FAIL ({info.get('knot_type')})"
 
                 print(f"         - Chirality: {chiral_str}")
                 print(f"         - Bonds:     {bonds_str}")
@@ -571,6 +593,20 @@ if __name__ == "__main__":
         print(f"[!] CRITICAL ERROR: Failed to load external resources: {e}")
         sys.exit(1)
 
+    # Load pre-computed knot screening for topology matching
+    knot_screening_path = getattr(cfg, 'KNOT_SCREENING_PATH',
+        os.path.join(cfg.INPUT_DATA_DIR, "knot_screening.json"))
+    knot_screening = load_knot_screening(knot_screening_path)
+    if knot_screening:
+        n_knotted = sum(
+            1 for spec in knot_screening.values()
+            if any(d.get("knot") for d in spec)
+        )
+        print(f"    Knot screening: {len(knot_screening)} entries "
+              f"({n_knotted} with at least one natively knotted domain).")
+    else:
+        print(f"    Knot screening: not available (full-chain unknot baseline will be applied).")
+
     final_root_dir = args.output_dir
     temp_working_dir = os.path.join(final_root_dir, f"_temp_work_{batch_label}_{args.split_index}")
 
@@ -597,7 +633,8 @@ if __name__ == "__main__":
         final_output_root=final_root_dir,
         num_conformers=args.n_conformers,
         length_ref=length_ref,
-        verbose=verbose
+        verbose=verbose,
+        knot_screening=knot_screening
     )
 
     # Filter to valid IDs upfront
