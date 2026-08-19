@@ -26,43 +26,27 @@ from idpforge.utils.definitions import (
     coil_types, coil_sample_probs,
 )
 from idpforge.utils.np_utils import calc_rg, assign_rama
+            
 
 
-# ============================================================
-# JUNCTION DISTANCE FILTER
-# ============================================================
-_JUNCTION_CA_THRESHOLD = 6.46  # CA-CA (~3.8 A) + 2x C-N peptide bond (1.33 A)
-
-
-def _check_junction_distances(atom_positions, viol_mask, threshold=_JUNCTION_CA_THRESHOLD):
-    """
-    Check CA-CA distances at IDR/folded boundaries; reject conformers whose
-    IDR endpoints land too far from the adjacent folded residues before relaxation.
-
-    Args:
-        atom_positions: [L, 37, 3] atom37 coordinates (numpy).
-        viol_mask: [L] boolean array — True = IDR, False = folded.
-        threshold: Max allowed CA-CA distance in Angstroms.
-
-    Returns:
-        (passes, details):
-            passes — True if ALL boundary CA-CA distances are within threshold.
-            details — list of dicts with idr_res, fold_res, distance, pass.
-    """
-    CA_IDX = 1  # CA atom index in atom37 format
-    details = []
-    for i in range(len(viol_mask) - 1):
-        if viol_mask[i] != viol_mask[i + 1]:
-            ca_i = atom_positions[i, CA_IDX]
-            ca_j = atom_positions[i + 1, CA_IDX]
-            dist = float(np.linalg.norm(ca_i - ca_j))
-            idr_res = i if viol_mask[i] else i + 1
-            fold_res = i + 1 if viol_mask[i] else i
-            details.append({
-                "idr_res": idr_res, "fold_res": fold_res,
-                "distance": dist, "pass": dist <= threshold,
-            })
-    return all(d["pass"] for d in details), details
+def _ca_from_pdb_file(path, n_res):
+    """Parse CA coordinates from a PDB into an (n_res, 3) array."""
+    ca = np.zeros((n_res, 3), dtype=float)
+    seen = []
+    with open(path) as fh:
+        for line in fh:
+            if line[:6].strip() in ("ATOM", "HETATM") and line[12:16].strip() == "CA":
+                try:
+                    resseq = int(line[22:26])
+                    xyz = (float(line[30:38]), float(line[38:46]), float(line[46:54]))
+                except ValueError:
+                    continue
+                seen.append((resseq, xyz))
+    for pos, (_, xyz) in enumerate(sorted(seen, key=lambda t: t[0])):
+        if pos >= n_res:
+            break
+        ca[pos] = xyz
+    return ca
 
 
 def onehot_to_ss(tokens, mask):
@@ -81,7 +65,7 @@ def encode_ss(
         ss = "".join([np.random.choice(list(coil_sample_probs.keys()), 
                                        p=list(coil_sample_probs.values())) if i in coil_types \
                       else i for i in ss])
-    ss = re.sub(r'[AH]{6,}', lambda match: 'H' * len(match.group()), ss) 
+    ss = re.sub(r'[AH]{6,}', lambda match: 'H' * len(match.group()), ss)
     if chain_linker is None:
         chain_linker = ""
     chains = ss.split(":")
@@ -130,7 +114,7 @@ def input_process(
     elif not isinstance(residx, torch.Tensor):
         residx = collate_dense_tensors(residx)
     return aatype, sstype, aa_mask, residx, linker_mask
-    
+
 
 def output_to_pdb(
     output: dict,
@@ -140,19 +124,18 @@ def output_to_pdb(
     counter=1,
     counter_cap=None,
     verbose=False,
+    fold_ref_ca=None,
+    fold_mask=None,
+    fold_curv_ratio=None,
+    fold_curv_window=15,
+    junction_kappa=0.0,
     expected_knot_type=None,
+    orig_resid=None,
     **kwargs
 ):
-    """
-    Writes ATOM37 PDBs (with hydrogens) using numbered filenames.
-    Compatible with OpenMM relaxation and post-min validation.
+    """Writes ATOM37 PDBs (with hydrogens) using numbered filenames."""
 
-    Args:
-        counter: Starting file index (1-based). Files are named {counter}_raw.pdb.
-        counter_cap: If set, stops writing once counter exceeds this value.
-    """
-
-    # Convert atom14 → atom37 (IDPForge uses atom14 internally)
+    # Convert atom14 → atom37
     final_atom_positions = atom14_to_atom37(output["positions"], output)
     final_atom_positions = final_atom_positions.numpy()
 
@@ -163,13 +146,24 @@ def output_to_pdb(
     if select_idx is None:
         select_idx = range(output["aatype"].shape[0])
 
+    # IDR mask for the pre-relax junction filter
+    viol_mask = kwargs.get("viol_mask")
+
+    # Map a local position to the displayed residue number
+    def _disp_resid(pos):
+        if orig_resid is not None and 0 <= pos < len(orig_resid):
+            return int(orig_resid[pos]) + 1
+        return pos + 1
+
+    # Pre-relax screening
+    from idpforge.utils.pre_relax import (
+        check_backbone_continuity, _JUNCTION_CA_THRESHOLD, _BACKBONE_CA_THRESHOLD,
+    )
+
     written_files = []
     file_idx = counter
 
-    # Junction distance filter: extract viol_mask (do NOT pop — relax_protein needs it)
-    viol_mask = kwargs.get("viol_mask", None)
-
-    # Build set of indices that already have validated files (to skip gaps only)
+    # Indices that already have validated files
     existing_indices = set()
     if save_path is not None:
         from glob import glob as _glob
@@ -193,32 +187,54 @@ def output_to_pdb(
         aa = output["aatype"][i]
         pred_pos = final_atom_positions[i]
         mask = final_atom_mask[i]
-        resid = output["residue_index"][i] + 1  # preserve numbering
+        resid = output["residue_index"][i] + 1
 
-        # --- NaN coordinate filter ---
+        # NaN coordinate filter
         if np.isnan(pred_pos).any():
             if verbose:
                 print(f"       [NaN] Conformer {file_idx} has NaN coordinates, skipping.", flush=True)
             continue
 
-        # --- Junction distance filter (pre-relaxation) ---
-        if viol_mask is not None:
-            junc_pass, junc_details = _check_junction_distances(pred_pos, viol_mask)
-            if not junc_pass:
-                if verbose:
-                    for d in junc_details:
-                        status = "OK" if d["pass"] else "FAIL"
-                        print(f"       [JUNCTION] res {d['idr_res']+1}(IDR) <-> "
-                              f"res {d['fold_res']+1}(fold): "
-                              f"CA-CA = {d['distance']:.2f} A  [{status}]", flush=True)
-                    print(f"       [JUNCTION] Conformer {file_idx} rejected "
-                          f"(boundary > {_JUNCTION_CA_THRESHOLD} A)", flush=True)
-                continue  # do NOT increment file_idx — next conformer reuses this slot
-            elif verbose:
-                for d in junc_details:
-                    print(f"       [JUNCTION] res {d['idr_res']+1}(IDR) <-> "
-                          f"res {d['fold_res']+1}(fold): "
-                          f"CA-CA = {d['distance']:.2f} A  [OK]", flush=True)
+        # Backbone continuity filter (pre-relaxation)
+        if viol_mask is not None and len(viol_mask) == pred_pos.shape[0]:
+            cont_pass, cont_details = check_backbone_continuity(
+                pred_pos, viol_mask, residue_index=resid)
+            if verbose and cont_details:
+                # Monotonic attempt counter
+                output_to_pdb._attempt = getattr(output_to_pdb, "_attempt", 0) + 1
+                n = output_to_pdb._attempt
+                verdict = "ACCEPTED" if cont_pass else "REJECTED"
+
+                lines = []
+                # Longest backbone break
+                bbs = [d for d in cont_details if d["kind"] == "backbone"]
+                if bbs:
+                    bw = max(bbs, key=lambda d: d["distance"])
+                    a, b = bw["res_i"], bw["res_j"]
+                    region = "IDR" if viol_mask[a] else "fold"
+                    op = "<=" if bw["pass"] else ">"
+                    lines.append(f"longest backbone res {_disp_resid(a)}->{_disp_resid(b)} ({region}) "
+                                 f"CA-CA = {bw['distance']:.2f} A {op} {_BACKBONE_CA_THRESHOLD} A "
+                                 f"[{'PASS' if bw['pass'] else 'FAIL'}]")
+                # Junction status
+                juncs = [d for d in cont_details if d["kind"] == "junction"]
+                if juncs:
+                    jw = max(juncs, key=lambda d: d["distance"])
+                    a, b = jw["res_i"], jw["res_j"]
+                    ta = "IDR" if viol_mask[a] else "fold"
+                    tb = "IDR" if viol_mask[b] else "fold"
+                    op = "<=" if jw["pass"] else ">"
+                    lines.append(f"junction res {_disp_resid(a)}({ta})<->{_disp_resid(b)}({tb}) "
+                                 f"CA-CA = {jw['distance']:.2f} A {op} {_JUNCTION_CA_THRESHOLD} A "
+                                 f"[{'PASS' if jw['pass'] else 'FAIL'}]")
+                if not lines:
+                    lines.append("(no backbone bonds checked)")
+                lines[-1] += f" -- {verdict}"
+                for k, L in enumerate(lines):
+                    pre = "\n       [JUNCTION]" if k == 0 else "       [JUNCTION]"
+                    print(f"{pre} Conformer {n}: {L}", flush=True)
+            if not cont_pass:
+                continue
 
         # Build full atom37 protein object
         pred = OFProtein(
@@ -243,12 +259,13 @@ def output_to_pdb(
 
         file_idx += 1
 
-    # If relaxation is requested, run it here with structural repair + validation
+    # Relaxation with structural repair + validation
     if relax is not None:
         from openmm.app import PDBFile as OMMPDBFile
         from idpforge.utils.relax import relax_protein
         from idpforge.utils.structure_validation import (
             validate_structure_post_relax, check_bond_integrity,
+            _check_fold_curvature, _check_junction_curvature,
         )
         from idpforge.utils.structure_repair import (
             repair_chirality, fix_histidine_naming,
@@ -371,9 +388,9 @@ def output_to_pdb(
                 threshold = 10.0
 
                 chiral_str = "PASS" if chiral_pass else "FAIL (D-Amino detected)"
-                bonds_str = "PASS" if bonds_pass else f"FAIL ({n_broken} broken)"
+                bonds_str = "PASS" if bonds_pass else \
+                    f"FAIL ({info.get('broken_bonds_first_res', str(n_broken) + ' broken')})"
                 clash_str = "PASS" if clash_pass else "FAIL"
-
                 if expected_knot_type is not None:
                     detected = info.get("detected_knot_type")
                     disp = info.get("expected_knot_display") or str(expected_knot_type)
@@ -392,10 +409,51 @@ def output_to_pdb(
                 print(f"         - Clashes:   {clash_count}  (Score: {clash_score:.2f} | Limit: {threshold:.1f})", flush=True)
                 print(f"         - Topology:  {knot_str}", flush=True)
 
+            # --- Post-relax structural gates (on the relaxed structure) ---
+            curv_on = (fold_curv_ratio is not None and fold_curv_ratio > 0
+                       and fold_ref_ca is not None and fold_mask is not None)
+            kappa_on = (junction_kappa is not None and junction_kappa > 0
+                        and viol_mask is not None)
+            if is_valid and (curv_on or kappa_on):
+                n_res = len(fold_mask) if fold_mask is not None else len(viol_mask)
+                rel_ca = _ca_from_pdb_file(relaxed_path, n_res)
+
+                # Folded-domain curvature gate
+                if curv_on:
+                    if rel_ca.shape[0] != np.asarray(fold_ref_ca).shape[0]:
+                        is_valid = False
+                        info["reason"] = info.get("reason", "") + " | fold-gate length mismatch"
+                        if verbose:
+                            print(f"         - Fold curvature: FAIL (residue count mismatch)", flush=True)
+                    else:
+                        gate_pass, gate_lines, gate_reason = _check_fold_curvature(
+                            rel_ca, fold_ref_ca, fold_mask, fold_curv_ratio, window=fold_curv_window)
+                        if not gate_pass:
+                            is_valid = False
+                            info["reason"] = info.get("reason", "") + " | " + gate_reason
+                        if verbose:
+                            detail = f"  ({gate_lines[0]})" if gate_lines else ""
+                            print(f"         - Fold curvature: {'PASS' if gate_pass else 'FAIL'}{detail}", flush=True)
+
+                # Junction curvature gate
+                if kappa_on and len(viol_mask) == rel_ca.shape[0]:
+                    curv_pass, curv_details = _check_junction_curvature(
+                        rel_ca, viol_mask, junction_kappa)
+                    if not curv_pass:
+                        is_valid = False
+                        info["reason"] = info.get("reason", "") + " | junction stretched (low curvature)"
+                    if verbose and curv_details:
+                        worst = min(curv_details, key=lambda d: d["mean_kappa"])
+                        print(f"         - Junction curvature: {'PASS' if curv_pass else 'FAIL'}"
+                              f"  (IDR res {_disp_resid(worst['idr_lo'])}-{_disp_resid(worst['idr_hi'])} mean kappa "
+                              f"{worst['mean_kappa']:.3f} >= {junction_kappa} A^-1)", flush=True)
+
             if is_valid:
                 valid_count += 1
                 validated_path = relaxed_path.replace("_relaxed.pdb", "_validated.pdb")
                 os.rename(relaxed_path, validated_path)
+                # Stamp the final conformer as a clean MODEL block
+                finalize_model_pdb(validated_path, stem)
                 if verbose:
                     print(f"       [RESULT] SUCCESS!", flush=True)
                 relaxed_files.append(validated_path)
@@ -411,5 +469,13 @@ def output_to_pdb(
 
     return written_files
 
-    
 
+def finalize_model_pdb(path, model_idx):
+    """Rewrite a single-conformer PDB in place as one clean MODEL block."""
+    keep = ("ATOM", "HETATM", "TER", "ANISOU")
+    with open(path) as fh:
+        body = [ln.rstrip() + "\n" for ln in fh if ln.startswith(keep)]
+    with open(path, "w") as fh:
+        fh.write(f"MODEL     {int(model_idx):>4d}\n")
+        fh.writelines(body)
+        fh.write("ENDMDL\n")

@@ -1,12 +1,4 @@
-"""
-Stitch Utilities
-================
-
-Helper functions for Step 4 (Kinematic Stitching & Relaxation Pipeline).
-
-Includes geometric assembly, structure manipulation, categorization,
-and directory/file mapping utilities.
-"""
+"""Helper functions for Step 4 kinematic stitching and relaxation."""
 import os
 import glob
 import re
@@ -33,14 +25,7 @@ MIN_CONFORMER_POOL_SIZE = cfg.MIN_CONFORMER_POOL_SIZE
 
 # --- Completion Status Helper ---
 def get_completion_status(conformer_count, target_conformers):
-    """
-    Determines the success tier of the sampling process.
-
-    Returns:
-        'Complete': Target ensemble size reached.
-        'Partially Complete': Sufficient sampling for preliminary analysis (>50).
-        'Failed': Insufficient sampling due to persistent steric clashes or kinematic failures.
-    """
+    """Return the success tier of the sampling process."""
     if conformer_count >= target_conformers:
         return "Complete"
     elif conformer_count > 50:
@@ -51,12 +36,7 @@ def get_completion_status(conformer_count, target_conformers):
 
 # --- Length Binning Helper ---
 def get_length_label(num_res):
-    """
-    Stratifies proteins into length bins for storage and analysis based on residue number.
-
-    This binning allows for performance profiling of the stitching algorithm
-    across different size scales (e.g., small <250 vs. huge >2000 residues).
-    """
+    """Stratify proteins into length bins by residue count."""
     if num_res <= 250: return "0-250"
     elif num_res <= 500: return "251-500"
     elif num_res <= 1000: return "501-1000"
@@ -67,12 +47,7 @@ def get_length_label(num_res):
 
 # --- IDR Region Identification Helper ---
 def build_region_resids(labeled_idrs):
-    """
-    Aggregates all residue indices belonging to Intrinsically Disordered Regions (IDRs).
-
-    This set is used during energy minimization to define the 'mobile' selection,
-    allowing IDRs to relax while folded domains remain restrained.
-    """
+    """Aggregate all residue indices belonging to IDRs."""
     region_resids = []
     for idr in labeled_idrs:
         start, end = idr['range']
@@ -82,15 +57,10 @@ def build_region_resids(labeled_idrs):
 
 # --- PDB File Mapping Helper ---
 def get_id_to_pdb_path():
-    """
-    Indexes the configurated database to map UniProt IDs to local PDB file paths.
-
-    Handles both standard AF2 naming conventions (AF-ID-F1)
-    and simplified filenames.
-    """
+    """Map UniProt IDs to local PDB file paths."""
+    dbg_map = getattr(cfg, "DEBUG_PDB_MAP", False)
     if cfg.VERBOSE:
-        print(f"--- DEBUG: MAPPING PDBs ---")
-        print(f"Scanning directory: {cfg.PDB_LIBRARY_PATH}")
+        print(f"--- Mapping PDB library: {cfg.PDB_LIBRARY_PATH}")
 
     id_to_pdb_path = {}
 
@@ -100,15 +70,15 @@ def get_id_to_pdb_path():
 
     files = os.listdir(cfg.PDB_LIBRARY_PATH)
     if cfg.VERBOSE:
-        print(f"Found {len(files)} files in directory.")
+        print(f"    Found {len(files)} files in library.")
 
-    # Pre-compile regex patterns for speed
+    # Pre-compile regex patterns
     af_pattern = re.compile(r"AF-([A-Z0-9]+)-F1")
     simple_pattern = re.compile(r"([A-Z0-9]+)\.pdb")
 
     for filename in files:
         if not filename.endswith(".pdb"):
-            if cfg.VERBOSE:
+            if dbg_map:
                 print(f"  [Skip] Not a .pdb: {filename}")
             continue
 
@@ -119,19 +89,19 @@ def get_id_to_pdb_path():
         if match:
             pid = match.group(1)
             id_to_pdb_path[pid] = pdb_path
-            if cfg.VERBOSE:
+            if dbg_map:
                 print(f"  [Match] AF-Format: {filename} -> ID: {pid}")
             continue
 
-        # 2. Try Simple Format (e.g., O14653.pdb)
+        # 2. Try Simple Format
         match_simple = simple_pattern.match(filename)
         if match_simple:
             pid = match_simple.group(1)
             id_to_pdb_path[pid] = pdb_path
-            if cfg.VERBOSE:
+            if dbg_map:
                 print(f"  [Match] Simple-Format: {filename} -> ID: {pid}")
         else:
-            if cfg.VERBOSE:
+            if dbg_map:
                 print(f"  [FAIL] No Regex Matched for: {filename}")
 
     print(f"--- Finished Mapping. Total IDs: {len(id_to_pdb_path)} ---")
@@ -140,12 +110,7 @@ def get_id_to_pdb_path():
 
 # --- Protein Category Helper ---
 def get_protein_category(labeled_idrs):
-    """
-    Categorizes protein based on complexity: Loop (Hardest) > Linker > Tail (Easiest).
-    - If it has a Loop -> Category 3 (Automatically, regardless of others).
-    - If it has a Linker (but no Loop) -> Category 2.
-    - If it has only Tails -> Category 1.
-    """
+    """Categorize a protein by IDR complexity (Loop > Linker > Tail)."""
     idr_types = set(idr['type'] for idr in labeled_idrs)
 
     if len(idr_types) == 1 and "IDP" in idr_types:
@@ -165,12 +130,7 @@ def get_protein_category(labeled_idrs):
 
 # --- Ensemble Directory Finder ---
 def find_ensemble_dirs(protein_id, conformer_root_dir, labeled_idrs, verbose=False):
-    """
-    Locates the pre-generated conformational ensembles for each disordered segment.
-
-    Validates that a sufficient pool of conformers (MIN_CONFORMER_POOL_SIZE) exists
-    to allow for diverse sampling without over-relying on a single conformation.
-    """
+    """Locate the pre-generated conformer ensembles for each disordered segment."""
     ensemble_paths = {}
     base_protein_path = os.path.join(conformer_root_dir, protein_id)
     if not os.path.isdir(base_protein_path):
@@ -207,10 +167,7 @@ def find_ensemble_dirs(protein_id, conformer_root_dir, labeled_idrs, verbose=Fal
 
 # --- Range Identifier ---
 def format_ranges(indices):
-    """
-    Formats a list of residue indices into a human-readable range string (e.g., '1-10, 25-30').
-    Used for concise logging of frozen/mobile selections.
-    """
+    """Format a list of residue indices into a range string (e.g., '1-10, 25-30')."""
     if not indices: return "None"
     indices = sorted(indices)
     ranges = []
@@ -234,12 +191,7 @@ def format_ranges(indices):
 
 # --- PDB Structure Loader ---
 def load_pdb_structure(pdb_path, parser, verbose=False):
-    """
-    Loads a PDB file into a BioPython Structure object with error handling.
-
-    Ensures the file is not corrupted and contains at least one valid chain
-    before proceeding with geometric operations.
-    """
+    """Load a PDB file into a BioPython Structure object."""
     try:
         structure = parser.get_structure(os.path.basename(pdb_path), pdb_path)
         if not structure or not structure.get_list(): return None
@@ -256,12 +208,7 @@ def load_pdb_structure(pdb_path, parser, verbose=False):
 
 # --- Segment Atom Extractor ---
 def get_segment_atoms(structure, chain_id, segment_residues):
-    """
-    Extracts the backbone atoms (N, CA, C) for a specific residue segment.
-
-    These atoms serve as the 'alignment stub' for kinematic superposition,
-    defining the coordinate frame for stitching.
-    """
+    """Extract the backbone atoms (N, CA, C) for a residue segment."""
     atoms = []
     if chain_id not in structure[0]: return []
     chain = structure[0][chain_id]
@@ -275,12 +222,7 @@ def get_segment_atoms(structure, chain_id, segment_residues):
 
 # --- Segment Map Builder ---
 def build_segment_map(labeled_idrs, all_residues_set):
-    """
-    Partitions the protein sequence into alternating 'Folded' and 'Disordered' segments.
-
-    This map (e.g., F1 -> D1 -> F2) guides the sequential assembly process, ensuring
-    that domains are placed in the correct N-to-C terminal order.
-    """
+    """Partition the sequence into alternating folded and disordered segments."""
     seg_map = defaultdict(list)
     idr_residues_set = set()
     labeled_idrs.sort(key=lambda x: x['range'][0])
@@ -306,36 +248,49 @@ def build_segment_map(labeled_idrs, all_residues_set):
     return seg_map, idr_residues_set, f_domain_counter
 # ----------------------------------
 
+# --- Round-robin conformer draw ---
+def _next_conformer(entry):
+    """Draw the next conformer file from a sub-ensemble pool in round-robin order."""
+    files = entry.get('files') or []
+    if not files:
+        return None
+    order = entry.get('_order')
+    cursor = entry.get('_cursor', 0)
+    if not order or cursor >= len(order):
+        order = list(files)
+        random.shuffle(order)
+        entry['_order'] = order
+        cursor = 0
+    entry['_cursor'] = cursor + 1
+    return order[cursor]
+# ----------------------------------
+
+# --- Truncated sub-conformer back-numbering ---
+def renumber_pool(src_dir, dst_dir, offset, verbose=False):
+    """Write copies of every *_validated.pdb in src_dir with resSeq += offset."""
+    os.makedirs(dst_dir, exist_ok=True)
+    src = sorted(glob.glob(os.path.join(src_dir, "*_validated.pdb")))
+    out = []
+    for p in src:
+        dst = os.path.join(dst_dir, os.path.basename(p))
+        with open(p) as fh, open(dst, "w") as w:
+            for line in fh:
+                if line[:6].strip() in ("ATOM", "HETATM"):
+                    try:
+                        new = int(line[22:26]) + offset
+                    except ValueError:
+                        w.write(line); continue
+                    line = line[:22] + f"{new:>4d}" + line[26:]
+                w.write(line)
+        out.append(dst)
+    if verbose:
+        print(f"   renumbered {len(out)} conformers by +{offset} -> {dst_dir}", flush=True)
+    return out
+# ----------------------------------
+
 # --- Kinematic Chain Assembler ---
 def assemble_kinematic_chain(static_structure, ensemble_dirs, labeled_idrs, all_residues_set, pdb_parser):
-    """
-    Performs the kinematic stitching algorithm to assemble a full-length model.
-
-    This method relies on superimposing the earlier defined alignment stub of the folded domains to
-    accurately propagate the angular trajectory of the disordered regions.
-
-    Algorithm:
-    1. Initialization: Starts with the first folded domain (F1) from the static
-       AlphaFold2 template as the primary anchor.
-    2. Stub Definition: For the interface between the current anchor and the next
-       segment, defines an 'Alignment Stub'.
-       - Logic: Midpoint of the current Folded Domain +/- X residues (Default: 5).
-       - Purpose: Uses the most rigid part of the domain for alignment, avoiding
-         flexible terminal artifacts.
-    3. Geometric Alignment (Kabsch):
-       - Selects a random IDR conformer (which includes flanking folded boundaries).
-       - Superimposes the conformer's stub onto the anchor's stub.
-    4. Grafting (Overwrite):
-       - Cuts the current model exactly at the stub start residue.
-       - Pastes the aligned conformer from that residue onwards.
-       - This effectively replaces the C-terminal half of the anchor with the
-         conformationally sampled version, ensuring perfect continuity.
-    5. Iteration: Designates the folded domain embedded at the end of the new IDR
-       as the next anchor and repeats until the C-terminus is reached.
-
-    Returns:
-        Structure: A continuous, stitched model ready for energy minimization.
-    """
+    """Assemble a full-length model by kinematic stitching of IDR conformers."""
     try:
         base_model = static_structure[0]
         base_chain_id = next(iter(base_model)).id
@@ -357,7 +312,7 @@ def assemble_kinematic_chain(static_structure, ensemble_dirs, labeled_idrs, all_
                     final_chain.add(base_model[base_chain_id][res_seq_num].copy())
             current_anchor_chain = final_chain
         elif start_label.startswith("D"):
-            tail_conformer_file = random.choice(ensemble_dirs[start_label]['files'])
+            tail_conformer_file = _next_conformer(ensemble_dirs[start_label])
             tail_struct = load_pdb_structure(tail_conformer_file, pdb_parser)
             if not tail_struct: return None
             tail_chain = tail_struct[0].get_list()[0]
@@ -399,7 +354,7 @@ def assemble_kinematic_chain(static_structure, ensemble_dirs, labeled_idrs, all_
                     junction_stub_residues = anchor_residues[-ALIGNMENT_JUNCTION_SIZE:]
 
                 moving_anchor_atoms = get_segment_atoms(final_conformer, base_chain_id, junction_stub_residues)
-                conformer_file = random.choice(ensemble_dirs[segment_label]['files'])
+                conformer_file = _next_conformer(ensemble_dirs[segment_label])
                 conformer_struct = load_pdb_structure(conformer_file, pdb_parser)
                 if not conformer_struct: return None
                 conformer_chain_id = next(iter(conformer_struct[0])).id
@@ -445,13 +400,7 @@ def assemble_kinematic_chain(static_structure, ensemble_dirs, labeled_idrs, all_
 
 # --- Clean Structure Creator ---
 def clean_structure(structure):
-    """
-    Standardizes the stitched structure for simulation.
-
-    1. Renumbers residues sequentially to eliminate gaps from stitching.
-    2. Removes internal terminal atoms (OXT, H-caps) that would cause steric
-       clashes or incorrect topology in the forcefield.
-    """
+    """Standardize the stitched structure for simulation."""
     clean_structure_obj = Structure("clean")
     clean_model = Model(0)
     clean_chain = Chain("A")

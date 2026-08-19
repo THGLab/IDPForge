@@ -1,6 +1,7 @@
-import gc
 import os
 import sys
+
+import gc
 import yaml
 import torch
 import random
@@ -24,7 +25,8 @@ old_params = ["trunk.structure_module.ipa.linear_q_points.weight", "trunk.struct
 seed_everything(42)
 
 def main(sequence, ckpt_path, output_dir, sample_cfg,
-        batch_size=32, nsample=200, device="cpu", no_relax=False, verbose=False):
+        batch_size=32, nsample=200, device="cpu", ss_db_path=None,
+        no_relax=False, verbose=False):
 
     # 1. Load Config
     print(f"[idp] Loading Config: {sample_cfg}", flush=True)
@@ -86,7 +88,12 @@ def main(sequence, ckpt_path, output_dir, sample_cfg,
     # 6. Prepare Secondary Structure
     print(f"[idp] Preparing secondary structure...", flush=True)
     if settings["sec_path"] is None:
-        with open(settings["data_path"], "rb") as f:
+        # Resolve the secondary-structure DB path
+        data_path = ss_db_path or settings["data_path"]
+        if not os.path.isabs(data_path) and not os.path.exists(data_path):
+            data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), data_path)
+        print(f"[idp] Secondary structure DB: {data_path}", flush=True)
+        with open(data_path, "rb") as f:
             pkl = pickle.load(f)
         SEC_database = pd.DataFrame({"sequence": pkl[1], "sec": pkl[0]})
         try:
@@ -157,7 +164,7 @@ def main(sequence, ckpt_path, output_dir, sample_cfg,
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        # Re-count actual files on disk (some conformers may be rejected by relaxation)
+        # Re-count files on disk
         current_count = count_done()
 
     print(f"[idp] Generation Complete. {current_count} validated conformers in {abs_output_dir}")
@@ -172,10 +179,15 @@ if __name__ == "__main__":
     parser.add_argument('--batch', default=32, type=int)
     parser.add_argument('--nconf', default=100, type=int)
     parser.add_argument('--cuda', action="store_true")
+    parser.add_argument('--ss_db', default=None, type=str,
+                        help="Secondary-structure database .pkl; overrides the config's "
+                             "relative data_path (mirrors sample_ldr.py).")
     parser.add_argument('--no_relax', action="store_true", help="Skip relaxation (outputs raw pdb)")
     parser.add_argument('--verbose', action="store_true", help="Print structural validation details")
 
     args = parser.parse_args()
     device = "cuda" if args.cuda and torch.cuda.is_available() else "cpu"
+
     main(args.seq, args.ckpt_path, args.output_dir, args.sample_cfg,
-         args.batch, args.nconf, device, no_relax=args.no_relax, verbose=args.verbose)
+         args.batch, args.nconf, device, ss_db_path=args.ss_db,
+         no_relax=args.no_relax, verbose=args.verbose)

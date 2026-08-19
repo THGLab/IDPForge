@@ -1,5 +1,4 @@
-"""Structural validation utilities for protein conformers: chirality, bond
-integrity, backbone clash detection, and Alexander/HOMFLY knot topology."""
+"""Structural validation utilities for protein conformers."""
 
 from __future__ import annotations
 import json
@@ -22,26 +21,23 @@ VDW_RADII = {'C': 1.70, 'N': 1.55, 'O': 1.52, 'S': 1.80, 'P': 1.80, 'H': 1.20}
 
 # AlphaKnot2 Hybrid Settings
 ALEXANDER_TRIES        = 100
-# 0.65 => unknot in >=65/100 projections to exit early
+# Thresholds for Alexander Gatekeeper
 ALPHAKNOT_P_UNKNOT_MAX = 0.65
 
 _KNOT_RE = re.compile(r"HOMFLY_Knot\((.+)\)")
+
+
+# -------------------------
+# Curvature-gate window
+# -------------------------
+_JUNCTION_KAPPA_WINDOW = 20
 
 
 # ============================================================
 # 0. KNOT SCREENING UTILITIES
 # ============================================================
 def extract_knot_type(reason: Optional[str]) -> Optional[str]:
-    """Extract canonical knot type from a topology reason string.
-
-    Examples:
-        "HOMFLY_Knot(3_1)"    -> "3_1"
-        "HOMFLY_Knot(TMC)"    -> "TMC"
-        "HOMFLY_Knot(3_1#3_1)"-> "3_1#3_1"
-        "HighConf_Unknot=0.98" -> None
-        "HOMFLY_Unknot"       -> None
-        None                  -> None
-    """
+    """Extract the canonical knot type from a topology reason string."""
     if reason is None:
         return None
     m = _KNOT_RE.search(reason)
@@ -49,9 +45,7 @@ def extract_knot_type(reason: Optional[str]) -> Optional[str]:
 
 
 def load_knot_screening(json_path: str) -> Dict[str, List[Dict[str, Any]]]:
-    """Return {protein_id: [{"range": [start, end], "knot": K_or_None}, ...]}.
-    Empty list = no folded domain to constrain. Missing file = empty dict.
-    """
+    """Return {protein_id: [{"range": [start, end], "knot": K_or_None}, ...]}."""
     if not os.path.isfile(json_path):
         return {}
     with open(json_path) as f:
@@ -103,16 +97,13 @@ def _get_coords_64(topology, positions):
 # 2. VALIDATION LOGIC
 # ============================================================
 def check_chirality(topology, positions):
-    """
-    Checks for D-amino acids (chirality violations) in the backbone.
-    Returns a list of issues found.
-    """
+    """Check for D-amino acids (chirality violations) in the backbone."""
     pos = _get_coords_64(topology, positions)
     issues = []
     for res in topology.residues():
         if res.name == 'GLY': continue
 
-        # We need N, CA, C, CB to check chirality volume
+        # N, CA, C, CB for the chirality volume
         a = {atom.name: atom.index for atom in res.atoms() if atom.name in ('N', 'CA', 'C', 'CB')}
         if len(a) == 4:
             v_n = pos[a['N']] - pos[a['CA']]
@@ -122,47 +113,101 @@ def check_chirality(topology, positions):
             # Scalar triple product
             vol = float(np.dot(np.cross(v_n, v_c), v_cb))
 
-            # Volume < 0 indicates D-enantiomer (should be L)
             if vol < 1.0:
                 stereo = "D" if vol < 0 else "Planar/Distorted"
                 issues.append({"residue": f"{res.name}{res.id}", "volume": vol, "stereo": stereo})
     return issues
 
-def check_bond_integrity(topology, positions, threshold=2.2):
-    """
-    Checks for broken covalent bonds (> threshold Angstroms).
-    Naive implementation relying entirely on OpenMM's inferred topology.
-    """
+# Max heavy-atom covalent bond length
+_COVALENT_CUTOFF = 2.0
+
+
+def _bond_atom_is_heavy(atom):
+    sym = atom.element.symbol if getattr(atom, "element", None) is not None else atom.name.strip()[:1]
+    return (sym or "").upper() != "H"
+
+
+def check_bond_integrity(topology, positions, threshold=2.2, covalent_cutoff=_COVALENT_CUTOFF):
+    """Geometry/graph-based bond-integrity check (atom-name agnostic)."""
+    from collections import defaultdict
     positions = _get_coords_64(topology, positions)
-    broken = []
+    atoms = list(topology.atoms())
+
+    res_heavy = defaultdict(list)              # residue.index -> [heavy atom global indices]
+    exp_deg = defaultdict(lambda: defaultdict(int))   # ridx -> {atom_index: expected intra heavy degree}
+    exp_edges = defaultdict(list)              # ridx -> [(atom1, atom2)] expected intra heavy bonds
+    inter = []                                  # heavy inter-residue bonds (atom1, atom2)
+    for a in atoms:
+        if _bond_atom_is_heavy(a):
+            res_heavy[a.residue.index].append(a.index)
     for bond in topology.bonds():
-        i, j = bond.atom1.index, bond.atom2.index
-        d = float(np.linalg.norm(positions[i] - positions[j]))
-        if d > threshold:
-            print(f"         [BOND ERROR] {bond.atom1.residue.name}{bond.atom1.residue.id}({bond.atom1.name}) - {bond.atom2.residue.name}{bond.atom2.residue.id}({bond.atom2.name}) d={d:.2f} Å", flush=True)
+        a1, a2 = bond.atom1, bond.atom2
+        if not (_bond_atom_is_heavy(a1) and _bond_atom_is_heavy(a2)):
+            continue
+        if a1.residue.index == a2.residue.index:
+            exp_deg[a1.residue.index][a1.index] += 1
+            exp_deg[a1.residue.index][a2.index] += 1
+            exp_edges[a1.residue.index].append((a1, a2))
+        else:
+            inter.append((a1, a2))
+
+    broken = []
+    # --- intra-residue: heavy-atom graph comparison ---
+    for ridx, idxs in res_heavy.items():
+        edeg = exp_deg.get(ridx)
+        if not edeg:
+            continue
+        exp_seq = sorted(edeg.get(i, 0) for i in idxs)
+        obs = {i: 0 for i in idxs}
+        n = len(idxs)
+        for ii in range(n):
+            pi = positions[idxs[ii]]
+            for jj in range(ii + 1, n):
+                if float(np.linalg.norm(pi - positions[idxs[jj]])) <= covalent_cutoff:
+                    obs[idxs[ii]] += 1
+                    obs[idxs[jj]] += 1
+        obs_seq = sorted(obs.values())
+        if obs_seq == exp_seq:
+            continue
+        res = atoms[idxs[0]].residue
+        missing = (sum(exp_seq) - sum(obs_seq)) // 2          # >0 => fewer bonds than canonical
+        disconnected = (min(obs_seq) == 0 and min(exp_seq) >= 1)
+        if missing > 0 or disconnected:
+            # Broken heavy-atom bond
+            stretched = []
+            for b1, b2 in exp_edges.get(ridx, []):
+                d = float(np.linalg.norm(positions[b1.index] - positions[b2.index]))
+                if d > covalent_cutoff:
+                    stretched.append((b1.name, b2.name, d))
+            stretched.sort(key=lambda t: -t[2])
+            tag = "HIS" if res.name in ("HIS", "HID", "HIE", "HIP") else res.name
+            if stretched:
+                detail = "; ".join(f"{a}-{b} = {d:.2f} A" for a, b, d in stretched[:4])
+                print(f"         [BOND] {tag}{res.id} broken (intra: {detail} > {covalent_cutoff})", flush=True)
+            else:
+                print(f"         [BOND] {tag}{res.id} broken (intra: heavy-degree {obs_seq} != expected {exp_seq})", flush=True)
             broken.append({
-                "resname": bond.atom1.residue.name,
-                "resid": bond.atom1.residue.id,
-                "atom1": bond.atom1.name,  # Added for debugging
-                "atom2": bond.atom2.name,  # Added for debugging
-                "distance": d,
-                "resname2": bond.atom2.residue.name,
-                "resid2": bond.atom2.residue.id
+                "resname": res.name, "resid": res.id,
+                "atom1": stretched[0][0] if stretched else "(residue graph)",
+                "atom2": stretched[0][1] if stretched else "(missing bond)",
+                "distance": stretched[0][2] if stretched else float("nan"),
+                "resname2": res.name, "resid2": res.id,
+            })
+    # --- inter-residue bonds: direct distance ---
+    for a1, a2 in inter:
+        d = float(np.linalg.norm(positions[a1.index] - positions[a2.index]))
+        if d > threshold:
+            print(f"         [BOND] {a1.residue.name}{a1.residue.id}-{a2.residue.name}{a2.residue.id} broken "
+                  f"(inter: {a1.name}-{a2.name} = {d:.2f} A > {threshold})", flush=True)
+            broken.append({
+                "resname": a1.residue.name, "resid": a1.residue.id,
+                "atom1": a1.name, "atom2": a2.name, "distance": d,
+                "resname2": a2.residue.name, "resid2": a2.residue.id,
             })
     return broken
 
 def check_clashes_detailed(topology, positions, overlap_cutoff=0.4, idr_start=None, idr_end=None):
-    """
-    Fast Backbone-Backbone Clash Check (cKDTree).
-
-    FILTERS:
-    1. Atoms: N, CA, C (Skeleton only, O/OXT removed).
-    2. Exclusions:
-       - Bonded (i to i+1).
-       - Folded-Folded interactions (Ignored if idr_start/end provided).
-
-    Returns: (score, count, details)
-    """
+    """Fast backbone-backbone clash check (cKDTree)."""
     # 1. Minimal Backbone (Skeleton Only)
     BACKBONE_NAMES = {'N', 'CA', 'C'}
 
@@ -174,6 +219,7 @@ def check_clashes_detailed(topology, positions, overlap_cutoff=0.4, idr_start=No
     bb_res_ids = []
     bb_chain_ids = []
 
+    # Pre-fetch radii
     def get_r(elem): return VDW_RADII.get(elem, 1.70)
 
     for i, atom in enumerate(atoms):
@@ -200,20 +246,15 @@ def check_clashes_detailed(topology, positions, overlap_cutoff=0.4, idr_start=No
     # 3. Check Pairs with IDR Logic
     for i, j in pairs:
         # A. Chain/Bond Exclusion
-        # Ignore if Same Chain AND (Same Residue OR Adjacent Residue)
         if chain_ids[i] == chain_ids[j]:
             if abs(res_ids[i] - res_ids[j]) <= 1:
                 continue
 
         # B. Domain Logic (IDR vs Folded)
-        # If IDR range is defined, we skip checks where BOTH atoms are Folded.
         if idr_start is not None and idr_end is not None:
-            # Check if Atom I is in IDR
             is_i_idr = (idr_start <= res_ids[i] <= idr_end)
-            # Check if Atom J is in IDR
             is_j_idr = (idr_start <= res_ids[j] <= idr_end)
 
-            # If NEITHER is in the IDR (meaning both are folded), SKIP.
             if not is_i_idr and not is_j_idr:
                 continue
 
@@ -221,7 +262,6 @@ def check_clashes_detailed(topology, positions, overlap_cutoff=0.4, idr_start=No
         dist = np.linalg.norm(coords[i] - coords[j])
         overlap = (radii[i] + radii[j]) - dist
 
-        # overlap >= cutoff counts as a clash
         if overlap >= overlap_cutoff:
             clash_count += 1
 
@@ -231,6 +271,84 @@ def check_clashes_detailed(topology, positions, overlap_cutoff=0.4, idr_start=No
 # ============================================================
 # 3. TOPOLOGY (AlphaKnot2 Hybrid)
 # ============================================================
+def classify_global_topology_alphaknot(topology, positions, VERBOSE=False):
+    """Determine if the protein is knotted (Alexander -> HOMFLY hybrid)."""
+    import topoly as tp
+    from topoly.params import Closure
+
+    # Prepare Coordinates (CA only)
+    pos = _get_coords_64(topology, positions)
+    ca_atoms = sorted([a for a in topology.atoms() if a.name == "CA"], key=lambda x: int(x.residue.id))
+    if not ca_atoms: return {"label": "None", "reason": "NoCA"}
+
+    coords_list = pos[[a.index for a in ca_atoms]].tolist()
+
+    # ----------------------------------------
+    # Phase 1: Alexander Probabilistic Gatekeeper
+    # ----------------------------------------
+    try:
+        alex_results = tp.alexander(coords_list, tries=ALEXANDER_TRIES)
+    except Exception:
+        alex_results = {}
+
+    # Calculate Probability of Unknot
+    alex_p_unknot = 0.0
+    if isinstance(alex_results, dict):
+        for k, v in alex_results.items():
+            if str(k) in ["0_1", "Unknot", "0", "1"]:
+                alex_p_unknot += v
+
+    alex_p_knot = 1.0 - alex_p_unknot
+
+    # ----------------------------------------
+    # Phase 2: Decision Logic
+    # ----------------------------------------
+
+    # CASE A: High Confidence Unknot
+    if alex_p_unknot >= ALPHAKNOT_P_UNKNOT_MAX:
+        return {
+            "label": "None",
+            "closure_polys": [f"Alex_P_Unknot={alex_p_unknot:.2f}"],
+            "Alexander_Ran": True,
+            "HOMFLY_Ran": False,
+            "reason": f"HighConf_Unknot={alex_p_unknot:.2f}"
+        }
+
+    # CASE B: Ambiguous (Gray Zone) OR Likely Knot -> Run HOMFLY
+    try:
+        poly = tp.homfly(coords_list, closure=Closure.MASS_CENTER)
+
+        if poly is None:
+            return {"label": "Error", "reason": "HOMFLY_Failed", "Alexander_Ran": True, "HOMFLY_Ran": True}
+
+        # Check for Unknot in HOMFLY output
+        is_unknot_homfly = False
+        if isinstance(poly, str) and poly in ["0_1", "Unknot", "0", "1"]:
+            is_unknot_homfly = True
+        elif isinstance(poly, dict):
+            is_unknot_homfly = "0_1" in poly or "Unknot" in poly
+
+        if is_unknot_homfly:
+             return {
+                "label": "None",
+                "closure_polys": [f"Alex_P={alex_p_knot:.2f}|HOMFLY={str(poly)}"],
+                "Alexander_Ran": True,
+                "HOMFLY_Ran": True,
+                "reason": "HOMFLY_Unknot"
+            }
+        else:
+             return {
+                "label": "Knot",
+                "closure_polys": [f"Alex_P={alex_p_knot:.2f}|HOMFLY={str(poly)}"],
+                "Alexander_Ran": True,
+                "HOMFLY_Ran": True,
+                "reason": f"HOMFLY_Knot({str(poly)})"
+            }
+
+    except Exception as e:
+        return {"label": "Error", "reason": f"HOMFLY_Ex({str(e)})", "Alexander_Ran": True, "HOMFLY_Ran": True}
+
+
 def _classify_coords_alphaknot(coords_list):
     """Run the Alexander/HOMFLY hybrid classifier on a CA coordinate list."""
     import topoly as tp
@@ -240,7 +358,6 @@ def _classify_coords_alphaknot(coords_list):
         return {"label": "None", "reason": "NoCA",
                 "Alexander_Ran": False, "HOMFLY_Ran": False}
 
-    # Phase 1: Alexander Probabilistic Gatekeeper
     try:
         alex_results = tp.alexander(coords_list, tries=ALEXANDER_TRIES)
     except Exception:
@@ -253,7 +370,6 @@ def _classify_coords_alphaknot(coords_list):
                 alex_p_unknot += v
     alex_p_knot = 1.0 - alex_p_unknot
 
-    # CASE A: High Confidence Unknot
     if alex_p_unknot >= ALPHAKNOT_P_UNKNOT_MAX:
         return {
             "label": "None",
@@ -263,7 +379,6 @@ def _classify_coords_alphaknot(coords_list):
             "reason": f"HighConf_Unknot={alex_p_unknot:.2f}"
         }
 
-    # CASE B: Ambiguous or Likely Knot -> Run HOMFLY with Mass-Center closure
     try:
         poly = tp.homfly(coords_list, closure=Closure.MASS_CENTER)
         if poly is None:
@@ -297,23 +412,8 @@ def _classify_coords_alphaknot(coords_list):
                 "Alexander_Ran": True, "HOMFLY_Ran": True}
 
 
-def classify_global_topology_alphaknot(topology, positions, VERBOSE=False):
-    """Full-chain Alexander/HOMFLY classification."""
-    pos = _get_coords_64(topology, positions)
-    ca_atoms = sorted([a for a in topology.atoms() if a.name == "CA"],
-                      key=lambda x: int(x.residue.id))
-    if not ca_atoms:
-        return {"label": "None", "reason": "NoCA"}
-    coords_list = pos[[a.index for a in ca_atoms]].tolist()
-    return _classify_coords_alphaknot(coords_list)
-
-
 def classify_per_domain_topology(topology, positions, domains):
-    """Classify each folded domain range independently.
-
-    domains: [{"range": [start, end], "knot": K_or_None}, ...]
-    Returns per-domain dicts: range, label, knot, reason, expected_knot.
-    """
+    """Classify each folded domain range independently."""
     pos = _get_coords_64(topology, positions)
     ca_by_resid: Dict[int, Any] = {}
     for a in topology.atoms():
@@ -351,26 +451,141 @@ def classify_per_domain_topology(topology, positions, domains):
         })
     return out
 
+
 # ============================================================
-# 4. MAIN ENTRY POINT
+# 4. POST-RELAX FOLD GATES
+# ============================================================
+def _check_fold_gate(atom37, folded_mask, ref_ca, ref_mask, threshold,
+                     inclusion_radius=15.0, thresholds=(0.5, 1.0, 2.0, 4.0)):
+    """Superposition-free CA-lDDT quality gate over the folded region."""
+    folded_mask = np.asarray(folded_mask, dtype=bool)
+    sel = folded_mask if ref_mask is None else (folded_mask & np.asarray(ref_mask, dtype=bool))
+    model_ca = np.asarray(atom37)[:, 1, :][sel]
+    rca = np.asarray(ref_ca)[sel]
+
+    # Drop all-zero (missing/padding) rows
+    valid = (np.abs(model_ca).sum(-1) > 1e-6) & (np.abs(rca).sum(-1) > 1e-6)
+    model_ca, rca = model_ca[valid], rca[valid]
+    n = model_ca.shape[0]
+    if n < 2:
+        return True, [f"folded CA-lDDT skipped (n_folded={n})"], ""
+
+    Dm = np.linalg.norm(model_ca[:, None, :] - model_ca[None, :, :], axis=-1)
+    Dr = np.linalg.norm(rca[:, None, :] - rca[None, :, :], axis=-1)
+    included = (Dr < inclusion_radius) & ~np.eye(n, dtype=bool)
+    n_pairs = int(included.sum())
+    if n_pairs == 0:
+        return True, [f"folded CA-lDDT skipped (no pairs < {inclusion_radius} A)"], ""
+
+    diff = np.abs(Dm - Dr)[included]
+    score = float(np.mean([(diff < t).mean() for t in thresholds]))
+    passes = score >= threshold
+    lines = [f"folded CA-lDDT = {score:.3f} (n_folded={n}, pairs={n_pairs}, thr={threshold:.2f})"]
+    reason = "" if passes else f"folded-lDDT {score:.3f} < {threshold:.2f}"
+    return passes, lines, reason
+
+
+def _curvature_per_residue(ca, ca_ca_max=4.5):
+    """Discrete backbone curvature per residue (kappa_i = 2*sin(theta_i/2) / |r_{i+1}-r_{i-1}|)."""
+    ca = np.asarray(ca, dtype=float)
+    N = len(ca)
+    kappa = np.full(N, np.nan)
+    if N < 3:
+        return kappa
+    brk = np.linalg.norm(np.diff(ca, axis=0), axis=1) > ca_ca_max
+    for i in range(1, N - 1):
+        if brk[i - 1] or brk[i]:
+            continue
+        v1 = ca[i] - ca[i - 1]
+        v2 = ca[i + 1] - ca[i]
+        n1 = np.linalg.norm(v1); n2 = np.linalg.norm(v2)
+        chord = np.linalg.norm(ca[i + 1] - ca[i - 1])
+        if n1 == 0.0 or n2 == 0.0 or chord == 0.0:
+            continue
+        cos_th = np.clip(np.dot(v1, v2) / (n1 * n2), -1.0, 1.0)
+        kappa[i] = 2.0 * np.sin(np.arccos(cos_th) / 2.0) / chord
+    return kappa
+
+
+def _check_junction_curvature(ca_coords, viol_mask, kappa_min,
+                              window=_JUNCTION_KAPPA_WINDOW):
+    """Reject conformers whose IDR was pulled taut to reach the fold anchor."""
+    kappa = _curvature_per_residue(ca_coords)
+    N = len(viol_mask)
+    details = []
+    for i in range(N - 1):
+        if viol_mask[i] == viol_mask[i + 1]:
+            continue
+        if viol_mask[i]:
+            idxs = [j for j in range(i, max(-1, i - window), -1) if viol_mask[j]]
+        else:
+            idxs = [j for j in range(i + 1, min(N, i + 1 + window)) if viol_mask[j]]
+        kw = kappa[idxs]
+        kw = kw[np.isfinite(kw)]
+        if len(kw) == 0:
+            continue
+        mk = float(kw.mean())
+        details.append({"idr_lo": min(idxs), "idr_hi": max(idxs),
+                        "mean_kappa": mk, "pass": mk >= kappa_min})
+    return (all(d["pass"] for d in details) if details else True), details
+
+
+def _check_fold_curvature(model_ca, ref_ca, folded_mask, min_ratio,
+                          window=15, min_ref_kappa=0.03):
+    """Reject conformers whose junction-adjacent folded residues were pulled into a straight line."""
+    model_ca = np.asarray(model_ca, dtype=float)
+    ref_ca = np.asarray(ref_ca, dtype=float)
+    folded = np.asarray(folded_mask, dtype=bool)
+    N = len(folded)
+    k_mod = _curvature_per_residue(model_ca)
+    k_ref = _curvature_per_residue(ref_ca)
+
+    details = []
+    for i in range(N - 1):
+        if folded[i] == folded[i + 1]:
+            continue
+        if folded[i]:
+            idxs = [j for j in range(i, max(-1, i - window), -1) if folded[j]]
+        else:
+            idxs = [j for j in range(i + 1, min(N, i + 1 + window)) if folded[j]]
+        idxs = np.asarray(idxs, dtype=int)
+        both = np.isfinite(k_mod[idxs]) & np.isfinite(k_ref[idxs])
+        if int(both.sum()) < 3:
+            continue
+        km = float(np.mean(k_mod[idxs][both]))
+        kr = float(np.mean(k_ref[idxs][both]))
+        applied = kr >= min_ref_kappa
+        passes_j = (km >= min_ratio * kr) if applied else True
+        details.append({"fold_lo": int(idxs.min()), "fold_hi": int(idxs.max()),
+                        "k_model": km, "k_ref": kr, "applied": applied, "pass": passes_j})
+
+    passes = all(d["pass"] for d in details) if details else True
+    applied = [d for d in details if d["applied"]]
+    if applied:
+        worst = min(applied, key=lambda d: (d["k_model"] / d["k_ref"]) if d["k_ref"] else 1.0)
+        frac = worst["k_model"] / worst["k_ref"] if worst["k_ref"] else float("nan")
+        lines = [f"fold curvature model/ref = {frac:.2f} "
+                 f"(k_model={worst['k_model']:.3f}, k_ref={worst['k_ref']:.3f}, "
+                 f"thr={min_ratio:.2f}, win={window})"]
+        reason = "" if passes else (
+            f"fold-straightened model/ref={frac:.2f} < {min_ratio:.2f} "
+            f"(k_model={worst['k_model']:.3f} vs ref {worst['k_ref']:.3f})")
+    else:
+        lines = [f"fold curvature: no curved junction window (win={window})"]
+        reason = ""
+    return passes, lines, reason
+
+
+
+# ============================================================
+# 5. MAIN ENTRY POINT
 # ============================================================
 def validate_structure_post_relax(
     topology, positions, pdb_path="", strict_clash_threshold=10.0,
     idr_start=None, idr_end=None, attempts=None, verbose=False,
     full_report=False, expected_knot_type=None
 ):
-    """
-    Main validation function.
-
-    Args:
-        full_report: If True, runs ALL checks regardless of failures and
-                     populates every field in the info dict. If False
-                     (default), short-circuits on the first failure for speed.
-        expected_knot_type:
-            list[{range, knot}] -> per-domain match (empty list passes).
-            str                 -> legacy full-chain scalar match.
-            None                -> legacy full-chain unknot required.
-    """
+    """Main validation function."""
     info = {"pdb_path": pdb_path}
     all_pass = True
 
@@ -398,9 +613,6 @@ def validate_structure_post_relax(
     if not info["bonds_pass"]:
         all_pass = False
         first = broken[0]
-        if verbose:
-            print(f"         [DEBUG] Broken bond: {first['resname']}{first['resid']} "
-                  f"({first['atom1']}-{first['atom2']}) d={first['distance']:.2f} Å")
         info["broken_bonds_first_res"] = f"{first['resname']}{first['resid']}"
         if not full_report:
             info["reason"] = "BrokenBonds"
@@ -442,8 +654,7 @@ def validate_structure_post_relax(
             info["Time_Knots_s"] = round(time.perf_counter() - t0, 6)
             info["domain_topology"] = per_dom
             info["Alexander_Ran"] = any(d.get("label") != "Error" for d in per_dom)
-            info["HOMFLY_Ran"] = any(d.get("reason", "").startswith("HOMFLY")
-                                    or "HOMFLY" in d.get("reason", "") for d in per_dom)
+            info["HOMFLY_Ran"] = any("HOMFLY" in d.get("reason", "") for d in per_dom)
             info["Topology_Source"] = "PerDomain"
 
             mismatches = []
