@@ -23,17 +23,7 @@ def wrap_rad(x):
 
 
 def align_coords(crd1, crd2, atom_mask):
-    """
-    Aligns two sets of batched protein Cα atom coordinates using the Kabsch algorithm.
-
-    Args:
-        coords1 (np.ndarray): coordinates of the first protein, (B, nres, natom, 3).
-        coords2 (np.ndarray): coordinates of the second protein, (B, nres, natom, 3).
-        atom_mask (np.ndarray): Boolean mask of valid atoms, (B, nres).
-
-    Returns:
-        np.ndarray: Aligned coordinates of the second protein, (B, nres, natom, 3).
-    """
+    """Aligns two sets of batched protein Cα atom coordinates using the Kabsch algorithm."""
     # Mask coordinates (B, N, 3)
     crd1_masked = crd1[..., 1, :] * atom_mask[..., None]
     crd2_masked = crd2[..., 1, :] * atom_mask[..., None]
@@ -64,9 +54,7 @@ def align_coords(crd1, crd2, atom_mask):
 
 
 def linear_beta_schedule(T, b0, bT, steps=200): 
-    """
-    Given a noise schedule type, create the beta schedule
-    """
+    """Given a noise schedule type, create the beta schedule."""
     b0 *= T / steps 
     bT *= T / steps
     schedule = np.linspace(b0, bT, steps + 1) 
@@ -74,19 +62,7 @@ def linear_beta_schedule(T, b0, bT, steps=200):
 
     
 def get_noise_schedule(T, noiseT, noise1, schedule_type="linear"):
-    """
-    Function to create a schedule that varies the scale of noise given to the model over time
-
-    Parameters:
-        T: The total number of timesteps in the denoising trajectory
-        noiseT: The inital (t=T) noise scale
-        noise1: The final (t=1) noise scale
-        schedule_type: The type of function to use to interpolate between noiseT and noise1
-
-    Returns:
-        noise_schedule: A function which maps timestep to noise scale
-
-    """
+    """Create a schedule that varies the noise scale over time."""
 
     noise_schedules = {
         "constant": lambda t: noiseT,
@@ -100,10 +76,7 @@ def get_noise_schedule(T, noiseT, noise1, schedule_type="linear"):
     return noise_schedules[schedule_type]
     
 def get_mu_xt_x0(xt, px0, t, beta_schedule, alphabar_schedule, eps=1e-6):
-    """
-    Given xt, predicted x0 and the timestep t, give mu of x(t-1)
-    Assumes t is 0 indexed
-    """
+    """Given xt, predicted x0 and timestep t, give mu of x(t-1)."""
     sigma = (
         (1 - alphabar_schedule[t - 2]) / (1 - alphabar_schedule[t - 1])
     ) * beta_schedule[t - 1]
@@ -132,17 +105,7 @@ def get_next_ca(
     alphabar_schedule,
     noise_scale=1.0,
 ):
-    """
-    Given full atom x0 prediction (xyz coordinates), diffuse to x(t-1)
-
-    Parameters:
-        xt (L, 14/27, 3) set of coordinates
-        px0 (L, 14/27, 3) set of coordinates
-        t: time step. Note this is zero-index current time step, so are generating t-1
-        diffusion_mask (torch.tensor, required): Tensor of bools, True means diffused at this residue
-        noise_scale: scale factor for the noise being added
-
-    """
+    """Given full-atom x0 prediction (coordinates), diffuse to x(t-1)."""
     L = len(xt)
     px0 = px0 * crd_scale
     xt = xt * crd_scale
@@ -161,32 +124,13 @@ def get_next_ca(
     return delta / crd_scale
 
 def get_next_frames(xt, px0, t, diffuser, diffusion_mask, noise_scale=1.0):
-    """
-    get_next_frames gets updated frames using IGSO(3) + score_based reverse diffusion.
-
-
-    based on self.so3_type use score based update.
-
-    Generate frames at t-1
-    Rather than generating random rotations (as occurs during forward process), calculate rotation between xt and px0
-
-    Args:
-        t: integer time step
-        diffuser: Diffuser object for reverse igSO3 sampling
-        diffusion_mask: of shape [L] of type bool, True means to be updated 
-        noise_scale: scale factor for the noise added (IGSO3 only)
-
-    Returns:
-        backbone coordinates for step x_t-1 of shape [L, 3, 3]
-    """
+    """Get updated frames at t-1 using IGSO(3) score-based reverse diffusion."""
     B, L = xt.shape[:2]
     R_0 = rigid_from_3_points_np(px0).reshape(-1, 3, 3)
     R_t = rigid_from_3_points_np(xt).reshape(-1, 3, 3)
     Ca_t = xt[..., 1, :]
 
     # Replace degenerate rotation matrices (det ~ 0) with identity.
-    # This can happen early in training when the model predicts
-    # collinear or coincident N/Ca/C atoms.
     for R in [R_0, R_t]:
         dets = np.linalg.det(R)
         bad = (np.abs(dets) < 1e-6) | np.isnan(dets)
@@ -202,7 +146,6 @@ def get_next_frames(xt, px0, t, diffuser, diffusion_mask, noise_scale=1.0):
     all_rot_transitions = np.tile(np.identity(3), (B, L, 1, 1))
   
     # Sample next frame for each residue
-    # don't do calculations on masked positions since they end up as identity matrix
     dr = diffuser.so3_diffuser.reverse_sample_vectorized(
         R_t, R_0, t,
         noise_level=noise_scale,
@@ -226,17 +169,7 @@ def get_next_chi_angles(
     noise_scale=1.0,
     eps=1e-6
 ):
-    """
-    Given full atom x0 prediction (sidechain torsions), diffuse to x(t-1)
-
-    Parameters:
-        xt (B, L, 4) set of sidechain torsions
-        px0 (B, L, 4) set of sidechain torsions
-        t: time step. Note this is zero-index current time step, so are generating t-1
-        diffusion_mask (torch.tensor, required): Tensor of bools, True means diffused at this residue
-        noise_scale: scale factor for the noise being added
-
-    """
+    """Given full-atom x0 prediction (sidechain torsions), diffuse to x(t-1)."""
     sigma = (
         (1 - alphabar_schedule[t - 2]) / (1 - alphabar_schedule[t - 1])
     ) * beta_schedule[t - 1]
@@ -281,16 +214,7 @@ class EuclideanDiffuser:
         return self.apply_kernel_recursive(xyz, diffusion_mask, var_scale)
 
     def apply_kernel(self, x, t, diffusion_mask=None, var_scale=1):
-        """
-        Applies a noising kernel to the points in x
-
-        Parameters:
-            x (torch.tensor, required): (N, 3, 3) set of backbone coordinates
-
-            t (int, required): Which timestep
-
-            noise_scale (float, required): scale for noise
-        """
+        """Applies a noising kernel to the points in x."""
         assert len(x.shape) == 3
         L, _, _ = x.shape
 
@@ -314,9 +238,7 @@ class EuclideanDiffuser:
         return out_crds, delta
 
     def apply_kernel_recursive(self, xyz, diffusion_mask=None, var_scale=1):
-        """
-        Repeatedly apply self.apply_kernel T times and return all crds
-        """
+        """Repeatedly apply self.apply_kernel T times and return all crds."""
         
         bb_stack = [xyz.copy()]
         T_stack = [np.zeros_like(xyz[:, 1])]
@@ -340,17 +262,8 @@ class TorsionDiffuser:
         self.schedule_param = (b_0, b_T)
         self.beta_schedule = linear_beta_schedule(T, b_0, b_T)
 
-    def apply_kernel(self, x, t, diffusion_mask=None, var_scale=1):
-        """
-        Applies a noising kernel to the points in x
-
-        Parameters:
-            x (torch.tensor, required): (N, 4) set of chi torsions
-
-            t (int, required): Which timestep
-
-            noise_scale (float, required): scale for noise
-        """
+    def apply_kernel(self, x, t, diffusion_mask=None, var_scale=1, exists_mask=None):
+        """Applies a noising kernel to the points in x."""
         L, _ = x.shape
         b_t = self.beta_schedule[t]
    
@@ -359,15 +272,17 @@ class TorsionDiffuser:
         var = np.ones((L, 4)) * b_t * var_scale
         sampled_torsions = np.mod(np.random.normal(mean, np.sqrt(var)) + np.pi, 2 * np.pi) - np.pi
         
-        if not diffusion_mask is None and np.any(diffusion_mask == 0):
-            sampled_torsions[~diffusion_mask, ...] = -np.pi
+        if diffusion_mask is not None:
+            assert diffusion_mask.dtype == np.bool_
+            sampled_torsions[~diffusion_mask] = x[~diffusion_mask]
+        if exists_mask is not None:
+            assert exists_mask.dtype == np.bool_
+            sampled_torsions[~exists_mask] = -np.pi
 
         return sampled_torsions
 
-    def diffuse_torsions(self, torsions, diffusion_mask=None, var_scale=1):
-        """
-        Repeatedly apply self.apply_kernel T times and return all torsions
-        """
+    def diffuse_torsions(self, torsions, diffusion_mask=None, var_scale=1, exists_mask=None):
+        """Repeatedly apply self.apply_kernel T times and return all torsions."""
         
         stack = [torsions.copy()]
         sampled_tor = torsions.copy()
@@ -376,7 +291,8 @@ class TorsionDiffuser:
             sampled_tor = self.apply_kernel(
                 sampled_tor, t, 
                 var_scale=var_scale, 
-                diffusion_mask=diffusion_mask
+                diffusion_mask=diffusion_mask,
+                exists_mask=exists_mask
             )
             stack.append(sampled_tor)
 
@@ -385,13 +301,7 @@ class TorsionDiffuser:
 
 
 class IGSO3:
-    """
-    Class for taking in a set of backbone crds and performing IGSO3 diffusion
-    on all of them.
-
-    Unlike the diffusion on translations, much of this class is written for a
-    scaling between an initial time t=0 and final time t=1.
-    """
+    """Perform IGSO3 diffusion on a set of backbone coordinates."""
 
     def __init__(
         self,
@@ -402,16 +312,6 @@ class IGSO3:
         cache_file=None,
         num_omega=1000,
     ):
-        """
-
-        Args:
-            T: total number of time steps
-            min_sigma: smallest allowed scale parameter, should be at least 0.01 to maintain numerical stability.  Recommended value is 0.05.
-            min_b: lower value of beta in Ho schedule analogue
-            max_b: upper value of beta in Ho schedule analogue
-            num_omega: discretization level in the angles across [0, pi]
-        """
-
         self.T = T
 
         self.min_b = min_b
@@ -443,27 +343,16 @@ class IGSO3:
         return self.igso3_vals["discrete_sigma"]
 
     def sigma_idx(self, sigma: np.ndarray):
-        """
-        Calculates the index for discretized sigma during IGSO(3) initialization."""
+        """Calculates the index for discretized sigma during IGSO(3) initialization."""
         return np.digitize(sigma, self.discrete_sigma) - 1
 
     def t_to_idx(self, t: np.ndarray):
-        """
-        Helper function to go from discrete time index t to corresponding sigma_idx.
-
-        Args:
-            t: time index (integer between 1 and 200)
-        """
+        """Go from discrete time index t to corresponding sigma_idx."""
         continuous_t = t / self.T
         return self.sigma_idx(self.sigma(continuous_t))
 
     def sigma(self, t: torch.Tensor):
-        """
-        Extract \sigma(t) corresponding to chosen sigma schedule.
-
-        Args:
-            t: torch tensor with time between 0 and 1
-        """
+        r"""Extract \sigma(t) corresponding to chosen sigma schedule."""
         t_type = "torch"
         if not isinstance(t, torch.Tensor):
             t = torch.tensor(t)
@@ -471,25 +360,11 @@ class IGSO3:
         if torch.any(t < 0) or torch.any(t > 1):
             raise ValueError(f"Invalid t={t.item()}")
             
-        # add self.min_sigma for stability
         x = self.min_sigma + t * self.min_b + (t**2) * (self.max_b - self.min_b) / 2
         return x if t_type == "torch" else x.numpy()
 
     def g(self, t):
-        """
-        g returns the drift coefficient at time t
-
-        since
-            sigma(t)^2 := \int_0^t g(s)^2 ds,
-        for arbitrary sigma(t) we invert this relationship to compute
-            g(t) = sqrt(d/dt sigma(t)^2).
-
-        Args:
-            t: scalar time between 0 and 1
-
-        Returns:
-            drift cooeficient as a scalar.
-        """
+        r"""Return the drift coefficient at time t."""
         with torch.enable_grad():
             t = torch.tensor(t, requires_grad=True)
             sigma_sqr = self.sigma(t) ** 2
@@ -497,16 +372,7 @@ class IGSO3:
         return np.sqrt(grads.detach().numpy())
 
     def sample(self, ts, n_samples=1):
-        """
-        sample uses the inverse cdf to sample an angle of rotation from
-        IGSO(3)
-
-        Args:
-            ts: array of integer time steps to sample from.
-            n_samples: number of samples to draw.
-        Returns:
-        sampled angles of rotation. [len(ts), N]
-        """
+        """Sample an angle of rotation from IGSO(3) using the inverse cdf."""
         assert sum(ts == 0) == 0, "assumes one-indexed, not zero indexed"
         all_samples = []
         for t in ts:
@@ -520,25 +386,13 @@ class IGSO3:
         return np.stack(all_samples, axis=0)
 
     def sample_vec(self, ts, n_samples=1):
-        """sample_vec generates a rotation vector(s) from IGSO(3) at time steps
-        ts.
-
-        Return:
-            Sampled vector of shape [len(ts), N, 3]
-        """
+        """Generate rotation vector(s) from IGSO(3) at time steps ts."""
         x = np.random.randn(len(ts), n_samples, 3)
         x /= np.linalg.norm(x, axis=-1, keepdims=True)
         return x * self.sample(ts, n_samples=n_samples)[..., None]
 
     def score_norm(self, t, omega):
-        """
-        score_norm computes the score norm based on the time step and angle
-        Args:
-            t: integer time step
-            omega: angles array
-        Return:
-            score_norm with same shape as omega
-        """
+        """Compute the score norm based on the time step and angle."""
         sigma_idx = self.t_to_idx(t)
         score_norm_t = np.interp(
             omega,
@@ -548,20 +402,7 @@ class IGSO3:
         return score_norm_t
 
     def score_vec(self, ts, vec):
-        """score_vec computes the score of the IGSO(3) density as a rotation
-        vector. This score vector is in the direction of the sampled vector,
-        and has magnitude given by score_norms.
-
-        In particular, Rt @ hat(score_vec(ts, vec)) is what is referred to as
-        the score approximation in Algorithm 1
-
-
-        Args:
-            ts: times of shape [T]
-            vec: where to compute the score of shape [T, N, 3]
-        Returns:
-            score vectors of shape [T, N, 3]
-        """
+        """Compute the score of the IGSO(3) density as a rotation vector."""
         omega = np.linalg.norm(vec, axis=-1)
         all_score_norm = []
         for i, t in enumerate(ts):
@@ -578,21 +419,12 @@ class IGSO3:
         return score_norm * vec / omega[..., None]
 
     def exp_score_norm(self, ts):
-        """exp_score_norm returns the expected value of norm of the score for
-        IGSO(3) with time parameter ts of shape [T].
-        """
+        """Return the expected value of the norm of the score for IGSO(3)."""
         sigma_idcs = [self.t_to_idx(t) for t in ts]
         return self.igso3_vals["exp_score_norms"][sigma_idcs]
 
     def diffuse_frames(self, xyz, diffusion_mask=None):
-        """diffuse_frames samples from the IGSO(3) distribution to noise frames
-
-        Parameters:
-            xyz (np.array or torch.tensor, required): (L, 3, 3) set of backbone coordinates
-            mask (np.array or torch.tensor, required): (L,) set of bools. True/1 is diffused
-        Returns:
-            torch.Tensor : N/CA/C coordinates for each residue (T, L, 3, 3). T is time step.
-        """
+        """Sample from the IGSO(3) distribution to noise frames."""
         t = np.arange(self.T) + 1
         num_res = len(xyz)
             
@@ -620,43 +452,8 @@ class IGSO3:
 
 
     def reverse_sample_vectorized(self, R_t, R_0, t, noise_level, eps=1e-6):
-        """reverse_sample uses an approximation to the IGSO3 score to sample
-        a rotation at the previous time step.
-
-        Roughly - this update follows the reverse time SDE for Reimannian
-        manifolds proposed by de Bortoli et al. Theorem 1 [1]. But with an
-        approximation to the score based on the prediction of R0.
-        Unlike in reference [1], this diffusion on SO(3) relies on geometric
-        variance schedule.  Specifically we follow [2] (appendix C) and assume
-            sigma_t = sigma_min * (sigma_max / sigma_min)^{t/T},
-        for time step t.  When we view this as a discretization  of the SDE
-        from time 0 to 1 with step size (1/T).  Following Eq. 5 and Eq. 6,
-        this maps on to the forward  time SDEs
-            dx = g(t) dBt [FORWARD]
-        and
-            dx = g(t)^2 score(xt, t)dt + g(t) B't, [REVERSE]
-        where g(t) = sigma_t * sqrt(2 * log(sigma_max/ sigma_min)), and Bt and
-        B't are Brownian motions. The formula for g(t) obtains from equation 9
-        of [2], from which this sampling function may be generalized to
-        alternative noising schedules.
-        Args:
-            R_t: noisy rotation of shape [B, N, 3, 3]
-            R_0: prediction of un-noised rotation
-            t: integer time step
-            noise_level: scaling on the noise added when obtaining sample
-                (preliminary performance seems empirically better with noise
-                level=0.5)
-        Return:
-            sampled rotation matrix for time t-1 of shape [B, N, 3, 3]
-        Reference:
-        [1] De Bortoli, V., Mathieu, E., Hutchinson, M., Thornton, J., Teh, Y.
-        W., & Doucet, A. (2022). Riemannian score-based generative modeling.
-        arXiv preprint arXiv:2202.02763.
-        [2] Song, Y., Sohl-Dickstein, J., Kingma, D. P., Kumar, A., Ermon, S.,
-        & Poole, B. (2020). Score-based generative modeling through stochastic
-        differential equations. arXiv preprint arXiv:2011.13456.
-        """
-        # compute rotation vector corresponding to prediction of how r_t goes to r_0
+        """Sample a rotation at the previous time step using an IGSO3 score approximation."""
+        # rotation vector from r_t to r_0
         B, L = R_0.shape[:2]
         R_0t = np.einsum("...ij,...kj->...ik", R_t, R_0).reshape(-1, 3, 3)
         # Sanitize degenerate matrices before SVD
@@ -670,30 +467,22 @@ class IGSO3:
             return np.tile(np.identity(3), (B, L, 1, 1))
      
         # Approximate the score based on the prediction of R0.
-        # R_t @ hat(Score_approx) is the score approximation in the Lie algebra
-        # SO(3) (i.e. the output of Algorithm 1)
         Omega = np.linalg.norm(R_0t_rotvec, axis=-1)
         Omega[Omega == 0] = eps
         Score_approx = R_0t_rotvec * (self.score_norm(t, Omega) / Omega)[..., None]
 
-        # Compute scaling for score and sampled noise (following Eq 6 of [2])
+        # Compute scaling for score and sampled noise
         continuous_t = t / self.T
         rot_g = self.g(continuous_t)
 
-        # Sample and scale noise to add to the rotation perturbation in the
-        # SO(3) tangent space.  Since IG-SO(3) is the Brownian motion on SO(3)
-        # (up to a deceleration of time by a factor of two), for small enough
-        # time-steps, this is equivalent to perturbing r_t with IG-SO(3) noise.
-        # See e.g. Algorithm 1 of De Bortoli et al.
-        
+        # Sample and scale noise in the SO(3) tangent space
+
         Z = np.random.normal(np.zeros((B * L, 3)), 1)
         Z *= noise_level
 
         Delta_r = (rot_g**2) * self.step_size * Score_approx
     
-        # Sample perturbation from discretized SDE (following eq. 6 of [2]),
-        # This approximate sampling from IGSO3(* ; Delta_r, rot_g^2 *
-        # self.step_size) with tangent Gaussian.
+        # Sample perturbation from the discretized SDE
         Perturb_tangent = Delta_r + rot_g * np.sqrt(self.step_size) * Z # B * L, 3
         Perturb = Exp(Perturb_tangent).reshape(B, L, 3, 3)
         return Perturb
@@ -711,11 +500,6 @@ class Diffuser:
         tor_bT=0.06,
         cache=None
     ):
-        """
-        Parameters:
-            T (int, required): Number of steps in the schedule
-        """
-
         self.T = T
         self.crd_scale = crd_scale
         self.var_scale = var_scale
@@ -738,26 +522,20 @@ class Diffuser:
         sequence,
         diffusion_mask=None,
     ):
-        """
-        Given full atom xyz, sequence and atom mask, diffuse the protein frame
-        translations and rotations
-
-        Parameters:
-
-            xyz (L, 9, 3) set of coordinates
-            seq (L,) integer sequence
-            diffusion_mask (np.ndarray): True means diffused at this residue
-        """
+        """Given full-atom xyz and sequence, diffuse the protein frame translations and rotations."""
         
         L = len(xyz)
-        nan_mask = ~np.isnan(xyz).any()
-        assert np.sum(~nan_mask) == 0
+        assert not np.isnan(xyz).any()
+        xyz = np.array(xyz, dtype=float, copy=True)
 
-        # center unmasked structure at origin
-        if diffusion_mask is not None or np.any(diffusion_mask == 0):
-            xyz -= xyz[:, 1][diffusion_mask].mean(axis=0)  
+        # center the held structure at origin
+        if diffusion_mask is not None:
+            assert diffusion_mask.dtype == np.bool_
+            held = ~diffusion_mask
+            com = xyz[:, 1][held].mean(axis=0) if held.any() else xyz[:, 1].mean(axis=0)
         else:
-            xyz -= xyz[:, 1].mean(axis=0)
+            com = xyz[:, 1].mean(axis=0)
+        xyz -= com
 
         # 1 get frames
         diffused_frame_crds, R_deltas = self.so3_diffuser.diffuse_frames(
@@ -772,9 +550,11 @@ class Diffuser:
 
         # 3 get torsions
         torsions, torsion_mask = get_chi_angles(xyz, sequence)
-        torsion_diffusion_mask = torsion_mask if diffusion_mask is None else torsion_mask & diffusion_mask[:, None]
         diffused_torsions = self.tor_diffuser.diffuse_torsions(
-            torsions, diffusion_mask=torsion_diffusion_mask, var_scale=self.var_scale
+            torsions,
+            diffusion_mask=None if diffusion_mask is None else np.repeat(diffusion_mask[:, None], 4, 1),
+            var_scale=self.var_scale,
+            exists_mask=torsion_mask
         )
         diffused_torsions = np.stack((np.sin(diffused_torsions), np.cos(diffused_torsions)), axis=-1)
 
@@ -792,14 +572,7 @@ class Diffuser:
 
 
 class Denoiser:
-    """
-    Class for getting x(t-1) from predicted x0 and x(t)
-    Strategy:
-        Ca coordinates: Rediffuse to x(t-1) from predicted x0
-        Frames: Approximate update from rotation score
-        Torsions: 1/t of the way to the x0 prediction
-
-    """
+    """Get x(t-1) from predicted x0 and x(t)."""
 
     def __init__(
         self,
@@ -857,21 +630,10 @@ class Denoiser:
         diffusion_mask,
         motiff_mask=None,
     ):
-        """
-        Wrapper function to take px0, xt and t, and to produce xt-1
-        First, aligns px0 to xt
-        Then gets coordinates, frames and torsion angles
-
-        Parameters:
-            xt (torch.tensor, required): Current coordinates at timestep t
-            px0 (torch.tensor, required): Prediction of x0
-            t (int, required): timestep t
-            diffusion_mask (torch.tensor, required): Mask for structure diffusion, True for to be diffused
-            motiff_mask: (torch.tensor, optional): Mask for fixed motiff
-        """
+        """Take px0, xt and t and produce xt-1."""
 
         L, n_atom = x_t.shape[:2]
-        # align to a reference frame; or align px0 to xt based on a fixed motiff
+        # align px0 to xt
         if motiff_mask is not None:
             px_0 = align_coords(x_t, px_0, motiff_mask)  
             diffusion_mask = diffusion_mask & ~motiff_mask
