@@ -4,7 +4,7 @@ from os import path
 if __name__ == "__main__":
     setup(
         name='IDPForge', 
-        version='1.0.0',
+        version='1.1.0',
         description='A generative model for sampling IDPs and proteins with IDRs.',
         long_description=None,
         author='Oufan Zhang',
