@@ -1,17 +1,4 @@
-"""
-Step 2: Template Generation Dispatcher
-======================================
-
-Reads the labeled database and generates .npz structure templates for each 
-disordered region. These templates are required for the diffusion model (Step 3).
-
-Workflow:
-  1. Loads a subset of IDs (from --start-index or split files).
-  2. Maps IDs to AlphaFold PDB files.
-  3. Dispatches subprocess calls to 'mk_ldr_template.py' (for Tails/Loops)
-     or 'mk_flex_template.py' (for Linkers).
-  4. Aggregates fully disordered proteins (Category 0) into a separate JSON list.
-"""
+"""Step 2: generate per-IDR .npz structure templates for the diffusion model (Step 3)."""
 
 import json
 import os
@@ -20,6 +7,7 @@ import subprocess
 import argparse
 import time
 import re
+import tempfile
 import mdtraj as md
 from glob import glob
 
@@ -28,6 +16,8 @@ try:
 except ImportError:
     print("CRITICAL ERROR: 'project_config.py' not found.")
     sys.exit(1)
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def log(msg, force=False):
     if getattr(cfg, 'VERBOSE', True) or force:
@@ -56,13 +46,35 @@ def main(args):
     if IS_VERBOSE:
         print(f"   [STATUS] Verbose Mode: ON (Detailed Logs Enabled)", flush=True)
 
+    # --- Truncation setup ---
+    truncate = bool(getattr(args, "truncate", False))
+    trunc_tmp_dir = None
+    _extract_ca_by_resid = _compute_window = _slice_pdb_file = None
+    if truncate:
+        try:
+            if _REPO_ROOT not in sys.path:
+                sys.path.insert(0, _REPO_ROOT)
+            from Analysis.screen_knots import extract_ca_by_resid as _extract_ca_by_resid
+            from utils.truncate import compute_idr_truncation_window as _compute_window
+            from slice_pdb import slice_pdb_file as _slice_pdb_file
+            trunc_tmp_dir = os.path.join(args.output_dir, "_trunc_tmp")
+            os.makedirs(trunc_tmp_dir, exist_ok=True)
+            print("   [STATUS] Truncation: ON (IDR + adjacent folded domains; .trunc.json sidecars)", flush=True)
+        except Exception as e:
+            print(f"   [!] Truncation requested but unavailable ({e}); using full-length templates.", flush=True)
+            truncate = False
+
     # 1. Validation
     if not os.path.exists(args.labeled_db):
         print(f"ERROR: Labeled DB not found at {args.labeled_db}")
         sys.exit(1)
 
-    if not os.path.exists(args.id_lists_dir):
-        print(f"ERROR: ID List directory not found: {args.id_lists_dir}")
+    if args.id_file:
+        if not os.path.exists(args.id_file):
+            print(f"ERROR: ID file not found: {args.id_file}")
+            sys.exit(1)
+    elif not args.id_lists_dir or not os.path.exists(args.id_lists_dir):
+        print(f"ERROR: no input list -- set config RUN_ID_FILE / --id_file, or pass --id_lists_dir.")
         sys.exit(1)
 
     # 2. Load Resources
@@ -70,8 +82,12 @@ def main(args):
     with open(args.labeled_db, 'r') as f:
         labeled_db = json.load(f)
 
-    log(f"Loading work queue from: {args.id_lists_dir}", force=True)
-    all_txt_files = glob(os.path.join(args.id_lists_dir, "*.txt"))
+    if args.id_file:
+        log(f"Loading work queue from file: {args.id_file}", force=True)
+        all_txt_files = [args.id_file]
+    else:
+        log(f"Loading work queue from: {args.id_lists_dir}", force=True)
+        all_txt_files = glob(os.path.join(args.id_lists_dir, "*.txt"))
 
     if not all_txt_files:
         print("[!] No .txt files found.")
@@ -171,6 +187,15 @@ def main(args):
             stats['skipped_error'] += 1
             continue
 
+        # Observed CA residues
+        all_res = None
+        if truncate:
+            try:
+                all_res = set(_extract_ca_by_resid(pdb_path).keys())
+            except Exception as e:
+                log(f"  [!] {prot_id}: could not read CA resids ({e}); truncation off for this protein.")
+                all_res = None
+
         for idr in labeled_idrs:
             idr_type = idr.get('type')
             rng = idr.get('range')
@@ -199,16 +224,60 @@ def main(args):
                 script_name = "mk_flex (Dynamic)"
             else: continue
 
+            # --- Truncation ---
+            template_pdb = pdb_path
+            disorder_range = f"{rng[0]}-{rng[1]}"
+            sidecar = None
+            tmp_pdb = None
+            if truncate and not args.max_residues and all_res:
+                try:
+                    win = _compute_window(labeled_idrs, idr, all_res)
+                    if not win["is_noop"]:
+                        fd, tmp_pdb = tempfile.mkstemp(
+                            suffix=".pdb",
+                            prefix=f"{prot_id}_{win['trunc_lo']}-{win['trunc_hi']}_",
+                            dir=trunc_tmp_dir)
+                        os.close(fd)
+                        _slice_pdb_file(pdb_path, win["trunc_lo"], win["trunc_hi"],
+                                        tmp_pdb, renumber=False)
+                        template_pdb = tmp_pdb
+                        slo, shi = win["idr_range_seq"]
+                        disorder_range = f"{slo}-{shi}"
+                        sidecar = {
+                            "offset": win["offset"],
+                            "trunc_lo": win["trunc_lo"], "trunc_hi": win["trunc_hi"],
+                            "idr_range_full": list(win["idr_range_full"]),
+                            "idr_range_seq": list(win["idr_range_seq"]),
+                            "retained_labels": win["retained_labels"],
+                        }
+                        if IS_VERBOSE:
+                            keep = ",".join(win["retained_labels"]) or "-"
+                            print(f"  [TRUNC] {prot_id} idr {rng[0]}-{rng[1]} -> window "
+                                  f"{win['trunc_lo']}-{win['trunc_hi']} (offset {win['offset']}, "
+                                  f"seq {slo}-{shi}, keep {keep})", flush=True)
+                    elif IS_VERBOSE:
+                        print(f"  [TRUNC] {prot_id} idr {rng[0]}-{rng[1]}: window spans whole "
+                              f"protein -> no truncation.", flush=True)
+                except Exception as e:
+                    print(f"  [!] {prot_id} idr {rng[0]}-{rng[1]}: truncation failed ({e}); "
+                          f"using full-length PDB.", flush=True)
+                    template_pdb, disorder_range, sidecar, tmp_pdb = pdb_path, f"{rng[0]}-{rng[1]}", None, None
+
             cmd = [
                 cfg.PYTHON_EXEC, script,
-                pdb_path,
-                f"{rng[0]}-{rng[1]}",
+                template_pdb,
+                disorder_range,
                 out_path,
                 "--nconf", str(args.n_confs)
             ]
+            if script == cfg.SCRIPT_STATIC_TEMPLATE:
+                cmd += ["--seed_skew", str(args.seed_skew)]
+            if args.max_residues:
+                cmd += ["--max_residues", str(args.max_residues)]
+            if args.fold_per_side:
+                cmd += ["--fold_per_side", str(args.fold_per_side)]
 
             try:
-                # --- VERBOSE INFO BLOCK ---
                 if IS_VERBOSE:
                     print(f"  [INFO] Dispatching Template | Script: {script_name} | Timeout: {timeout}s", flush=True)
 
@@ -217,6 +286,9 @@ def main(args):
                 t_gen_end = time.time()
 
                 if res.returncode == 0:
+                    if sidecar is not None:
+                        with open(out_path[:-4] + ".trunc.json", "w") as sf:
+                            json.dump(sidecar, sf, indent=2)
                     if IS_VERBOSE:
                         print(f"  [TIMING] Template Generation: {t_gen_end - t_gen_start:.2f}s", flush=True)
                     else:
@@ -225,7 +297,7 @@ def main(args):
                 else:
                     print(f"[!] FAILED: {prot_id} {idr_type}")
                     err_msg = res.stderr.strip()[:200] if res.stderr else "Unknown Error"
-                    print(f"    Error: {err_msg}...") 
+                    print(f"    Error: {err_msg}...")
                     stats['skipped_error'] += 1
 
             except subprocess.TimeoutExpired:
@@ -234,6 +306,12 @@ def main(args):
             except Exception as e:
                 print(f"[!] EXCEPTION: {prot_id} - {e}")
                 stats['skipped_error'] += 1
+            finally:
+                if tmp_pdb and os.path.exists(tmp_pdb):
+                    try:
+                        os.remove(tmp_pdb)
+                    except OSError:
+                        pass
         
         stats['processed'] += 1
         
@@ -262,19 +340,45 @@ if __name__ == "__main__":
                         help="Force start at specific index (1-based).")
     parser.add_argument("--labeled_db", default=cfg.LABELED_DB_PATH,
                         help=f"Path to labeled database JSON (default: {cfg.LABELED_DB_PATH}).")
-    parser.add_argument("--id_lists_dir", default=cfg.ID_LISTS_DIR,
-                        help=f"Directory containing ID list .txt files (default: {cfg.ID_LISTS_DIR}).")
+    parser.add_argument("--id_file", default=cfg.RUN_ID_FILE,
+                        help=f"Single newline-separated ID list to process (default from config: "
+                             f"{cfg.RUN_ID_FILE}). Pass '' with --id_lists_dir to union a directory instead.")
+    parser.add_argument("--id_lists_dir", default=None,
+                        help="Optional: directory of ID list .txt files to union (used only when "
+                             "--id_file is empty).")
     parser.add_argument("--pdb_library", default=cfg.PDB_LIBRARY_PATH,
                         help=f"Path to AlphaFold PDB library (default: {cfg.PDB_LIBRARY_PATH}).")
     parser.add_argument("--output_dir", default=cfg.TEMPLATE_OUTPUT_DIR,
                         help=f"Output directory for templates (default: {cfg.TEMPLATE_OUTPUT_DIR}).")
     parser.add_argument("--n_confs", type=int, default=cfg.TEMPLATE_N_CONFS,
                         help=f"Number of conformations per template (default: {cfg.TEMPLATE_N_CONFS}).")
+    parser.add_argument("--seed_skew", type=float, default=cfg.TEMPLATE_SEED_SKEW,
+                        help=f"Tail/loop seed-distance skew on [d/2, d] -> mk_ldr (0=all d/2, 1=all d, "
+                             f"0.5=uniform; default {cfg.TEMPLATE_SEED_SKEW}). Linkers (mk_flex) ignore it.")
     parser.add_argument("--timeout_static", type=int, default=cfg.TIMEOUT_STATIC_TEMPLATE,
                         help=f"Timeout for static templates in seconds (default: {cfg.TIMEOUT_STATIC_TEMPLATE}).")
     parser.add_argument("--timeout_dynamic", type=int, default=cfg.TIMEOUT_DYNAMIC_TEMPLATE,
                         help=f"Timeout for dynamic templates in seconds (default: {cfg.TIMEOUT_DYNAMIC_TEMPLATE}).")
     parser.add_argument("--verbose", action="store_true", default=cfg.VERBOSE,
                         help="Enable detailed per-protein logging.")
+    parser.add_argument("--truncate", dest="truncate", action="store_true", default=None,
+                        help="Build each per-IDR template on the IDR + its adjacent folded "
+                             "domain(s) only (shrinks the Step-3 relax; stitched back in Step 4). "
+                             "Default: cfg.TRUNCATE_TO_ADJACENT.")
+    parser.add_argument("--no_truncate", dest="truncate", action="store_false",
+                        help="Disable truncation; build templates on the full-length PDB.")
+    parser.add_argument("--max_residues", type=int, default=cfg.TEMPLATE_MAX_RESIDUES,
+                        help="Graft-mode truncation (recommended for the graft stitcher): pass this "
+                             "cap to mk_ldr / mk_flex so each template keeps the IDR + a "
+                             "junction-adjacent fold block (>=50 per junction) sized to the cap and "
+                             "records the graft spec in the .npz. Step 3 (sample_ldr) then emits "
+                             "_truncation.json and Step 4 reconstruct_truncated_pool grafts + "
+                             "validates. Bypasses the old window pre-slice / .trunc.json path.")
+    parser.add_argument("--fold_per_side", type=int, default=cfg.TEMPLATE_FOLD_PER_SIDE,
+                        help="mk_ldr only: keep EXACTLY this many fold residues per junction "
+                             "('IDR + N fold' mode) instead of filling the --max_residues budget. "
+                             f"Smaller/more in-distribution. Default from config: {cfg.TEMPLATE_FOLD_PER_SIDE}.")
     args = parser.parse_args()
+    if args.truncate is None:
+        args.truncate = bool(getattr(cfg, "TRUNCATE_TO_ADJACENT", False))
     main(args)

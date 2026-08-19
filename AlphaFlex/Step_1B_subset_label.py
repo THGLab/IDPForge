@@ -1,42 +1,4 @@
-"""
-Step 1B: Subset Filtering & ID List Generation
-===============================================
-
-Creates a filtered list of protein IDs from the labeled database produced by
-Step 1. Supports two levels of filtering:
-
-  Basic (always active):
-    - Total protein length range (inclusive)
-
-  Advanced (optional, activate by specifying any of these):
-    - Per-type IDR counts: --tail_count, --linker_count, --loop_count
-    - Count matching mode: exact (default) or minimum (--min_mode)
-    - IDR length range applied to ALL IDRs in the protein (inclusive)
-
-Per-type count filters are independent. Only specified counts are enforced;
-unspecified types (None) are unconstrained. For example:
-  --tail_count 1 --linker_count 0
-matches proteins with exactly 1 Tail IDR and 0 Linker IDRs, regardless of
-how many Loop IDRs they have. With --min_mode, the same arguments match
-proteins with at least 1 Tail and at most 0 Linkers.
-
-When no advanced filters are specified, all proteins within the length range
-are included (equivalent to the original Step 1B behavior).
-
-Output is written to id_lists/custom_subsets/:
-  custom_subsets/
-     ├── <output_name>.txt                 Filtered UniProt ID list
-     ├── <output_name>_report.txt          Detailed per-protein report table
-     ├── <output_name>_histogram.png       IDR length distribution histogram
-     └── <output_name>_histogram_table.txt Histogram bin counts as text
-
-The report and histogram are only generated when advanced IDR filters are
-active. The output filename is controlled by --output_name (default from
-config.py: SUBSET_OUTPUT_NAME).
-
-Defaults are read from config.py (SUBSET_* parameters) and can be overridden
-via command-line arguments.
-"""
+"""Step 1B: create a filtered UniProt ID list from the Step 1 labeled database."""
 
 import json
 import os
@@ -51,9 +13,7 @@ except ImportError:
     sys.exit(1)
 
 
-# =============================================================================
-# IDR TYPE CONSTANTS
-# =============================================================================
+# IDR type constants
 TYPE_TAIL = "Tail IDR"
 TYPE_LINKER = "Linker IDR"
 TYPE_LOOP = "Loop IDR"
@@ -70,21 +30,20 @@ def count_idr_types(labeled_idrs):
 
 
 def check_type_counts(actual_counts, tail, linker, loop, exact):
-    """
-    Check per-type count constraints.
-    Only specified (non-None) counts are enforced.
-    In exact mode: actual == required.
-    In min mode:   actual >= required.
-    """
+    """Check per-type IDR count constraints; only non-None counts are enforced."""
     for required, type_key in [(tail, TYPE_TAIL),
                                 (linker, TYPE_LINKER),
                                 (loop, TYPE_LOOP)]:
         if required is None:
             continue
         actual = actual_counts[type_key]
-        if exact and actual != required:
-            return False
-        if not exact and actual < required:
+        if exact:
+            if actual != required:
+                return False
+        elif required == 0:
+            if actual != 0:
+                return False
+        elif actual < required:
             return False
     return True
 
@@ -147,7 +106,7 @@ def main(args):
     # 2. Process Data
     for prot_id, data in master_db.items():
 
-        # --- A. Protein Length Filter (always active) ---
+        # --- A. Protein Length Filter ---
         total_prot_len = num_residues_db.get(prot_id, 0)
         if not (min_p <= total_prot_len <= max_p):
             continue
@@ -164,7 +123,7 @@ def main(args):
                                       args.exact):
                 continue
 
-            # --- C. IDR Length Filter (applied to ALL IDRs) ---
+            # --- C. IDR Length Filter ---
             idr_min = args.idr_min_len if args.idr_min_len is not None else 0
             idr_max = args.idr_max_len if args.idr_max_len is not None else float('inf')
 
@@ -188,7 +147,7 @@ def main(args):
             if not all_idrs_ok:
                 continue
         else:
-            # Basic mode: collect IDR details for report but don't filter
+            # Basic mode
             idr_details = []
             for idr in idrs_only:
                 start, end = idr['range']
@@ -227,15 +186,11 @@ def main(args):
     hist_path = os.path.join(advanced_info_dir, f"{output_name}_histogram.png")
     table_path = os.path.join(advanced_info_dir, f"{output_name}_histogram_table.txt")
 
-    # =========================================================================
-    # OUTPUT 1: The ID List
-    # =========================================================================
+    # Output 1: ID list
     with open(list_path, 'w') as f:
         f.write("\n".join(id_list))
 
-    # =========================================================================
-    # OUTPUT 2: The Report Table
-    # =========================================================================
+    # Output 2: report table
     with open(report_path, 'w') as f:
         f.write(f" FILTRATION REPORT\n")
         f.write(f" Protein Length: {min_p}-{max_p}\n")
@@ -261,9 +216,7 @@ def main(args):
                    f"{c[TYPE_LOOP]:<6} | {'; '.join(idr_strs)}")
             f.write(row + "\n")
 
-    # =========================================================================
-    # OUTPUT 3 & 4: Histogram (only when advanced IDR filters are active)
-    # =========================================================================
+    # Output 3 & 4: histogram
     if advanced:
         import matplotlib.pyplot as plt
         import numpy as np
@@ -326,7 +279,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_len", type=int, default=cfg.SUBSET_MAX_LENGTH,
                         help=f"Maximum protein length, inclusive (default: {cfg.SUBSET_MAX_LENGTH}).")
 
-    # --- Per-type IDR count filters (optional, None = unconstrained) ---
+    # --- Per-type IDR count filters ---
     parser.add_argument("--tail_count", type=int, default=cfg.SUBSET_TAIL_COUNT,
                         help=f"Required Tail IDR count; omit for unconstrained (default: {cfg.SUBSET_TAIL_COUNT}).")
     parser.add_argument("--linker_count", type=int, default=cfg.SUBSET_LINKER_COUNT,
@@ -340,7 +293,7 @@ if __name__ == "__main__":
     parser.add_argument("--min_mode", action="store_true", default=False,
                         help="Minimum count matching (overrides --exact).")
 
-    # --- IDR length filter (optional, None = no filter) ---
+    # --- IDR length filter ---
     parser.add_argument("--idr_min_len", type=int, default=cfg.SUBSET_IDR_MIN_LENGTH,
                         help=f"Minimum IDR length, inclusive, applied to all IDRs (default: {cfg.SUBSET_IDR_MIN_LENGTH}).")
     parser.add_argument("--idr_max_len", type=int, default=cfg.SUBSET_IDR_MAX_LENGTH,
@@ -356,7 +309,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # --min_mode overrides --exact
     if args.min_mode:
         args.exact = False
 

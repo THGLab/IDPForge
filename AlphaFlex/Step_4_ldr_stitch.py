@@ -1,42 +1,4 @@
-"""
-Step 4: Stitching & Relaxation Pipeline
-===============================
-
-This script orchestrates the high-throughput assembly of full-length protein models 
-by stitching pre-generated disordered ensembles onto folded domains. It is designed 
-for scalability, supporting parallel execution across High-Performance Computing (HPC) 
-clusters via deterministic list sharding.
-
-Usage:
-    # Single Process (Default)
-    python Step_4_multiple_ldr_stitch.py --id_file ids.txt
-
-    # Parallel Execution (e.g., Job 1 of 10)
-    python Step_4_multiple_ldr_stitch.py --id_file ids.txt --total_splits 10 --split_index 0
-
-Workflow:
-    1. Input Handling: Reads protein IDs and performs deterministic sorting to ensure 
-       consistent sharding across parallel jobs.
-    2. Splitting (Optional): If --total_splits > 1, mathematically divides the sorted 
-       list into N equal chunks and selects the subset corresponding to --split_index.
-    3. Resource Mapping: Maps IDs to AlphaFold2 anchors and IDP conformer pools.
-    4. Execution: Runs the Monte Carlo Stitching -> Relaxation -> Validation pipeline 
-       for each protein in the assigned chunk.
-    5. Output: Writes results to a unique temporary directory (to prevent race conditions) 
-       before finalizing them in the shared output root.
-
-Arguments:
-    --id_file (str):      
-        Path to a text file containing newline-separated UniProt IDs to process.
-    
-    --total_splits (int, default=1): 
-        Total number of parallel jobs (shards) the input list is divided into. 
-        Set this to the size of your SLURM job array.
-    
-    --split_index (int, default=0):  
-        The specific shard index (0-based) to process in this execution instance.
-        Must be strictly less than --total_splits.
-"""
+"""Step 4: stitch pre-generated IDR ensembles onto folded domains into full-length models."""
 import os
 import glob
 import re
@@ -48,15 +10,62 @@ import json
 import io
 import shutil
 from tqdm import tqdm
-from pdbtools import pdb_mkensemble
+
+# Path setup
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(SCRIPT_DIR)
+if ROOT_DIR not in sys.path:
+    sys.path.append(ROOT_DIR)
+
+import contextlib
+
+
+def _process_protein_to_file(protein_id, _log_dir, **kwargs):
+    """Run process_protein with its stdout/stderr streamed to a per-protein log file."""
+    log_path = os.path.join(_log_dir, f"{protein_id}.log")
+    result, err = None, None
+    with open(log_path, "w", buffering=1) as fh:
+        with contextlib.redirect_stdout(fh), contextlib.redirect_stderr(fh):
+            try:
+                result = process_protein(protein_id=protein_id, **kwargs)
+            except BaseException:
+                import traceback
+                traceback.print_exc()
+                err = traceback.format_exc()
+    return result, log_path, err
 
 
 def mkensemble(pdb_files):
-    """Wrapper around pdb_mkensemble.run that ensures each line ends with \\n.
-    pdb-tools' pad_line can swallow the newline on TER records, causing
-    ENDMDL to be appended to the TER line instead of its own line."""
-    for line in pdb_mkensemble.run(pdb_files):
-        yield line.rstrip('\n') + '\n'
+    """Concatenate pre-stamped single-MODEL conformer PDBs into one ensemble."""
+    for path in pdb_files:
+        with open(path) as fh:
+            for line in fh:
+                if line.startswith(("PARENT", "REMARK", "MASTER", "CRYST")):
+                    continue
+                if line.rstrip() == "END":
+                    continue
+                yield line if line.endswith("\n") else line + "\n"
+    yield "END\n"
+
+
+
+def _max_ensemble_n(final_dest_dir, protein_id):
+    """Largest N among existing ``<protein>_ensemble_nN.pdb`` files (-1 if none)."""
+    best = -1
+    for p in glob.glob(os.path.join(final_dest_dir, f"{protein_id}_ensemble_n*.pdb")):
+        m = re.search(r"_ensemble_n(\d+)\.pdb$", os.path.basename(p))
+        if m:
+            best = max(best, int(m.group(1)))
+    return best
+
+
+def _clear_stale_ensembles(final_dest_dir, protein_id):
+    """Remove existing ``<protein>_ensemble_nN.pdb`` files."""
+    for p in glob.glob(os.path.join(final_dest_dir, f"{protein_id}_ensemble_n*.pdb")):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
 
 
 # --- BioPython Setup ---
@@ -66,7 +75,6 @@ try:
 except ImportError:
     print("Error: BioPython is required. Run: conda install -c conda-forge biopython")
     sys.exit(1)
-# ---
 
 # --- OpenMM Setup ---
 try:
@@ -76,11 +84,11 @@ except ImportError:
     print("Error: OpenMM is required for this script.")
     print("Please install it in your environment: conda install -c conda-forge openmm")
     sys.exit(1)
-# ---
 
-# --- Relax.py and Config Import Setup ---
+# --- Imports ---
 from idpforge.utils.relax import relax_protein
-# ---
+from idpforge.misc import _ca_from_pdb_file, finalize_model_pdb
+from idpforge.utils.structure_validation import _check_fold_curvature
 
 # --- Import Config ---
 try:
@@ -88,25 +96,24 @@ try:
 except ImportError:
     print("Error: auto_config.py not found. Please create it.")
     sys.exit(1)
-# ---
 
-# --- Shared Utility Imports (same as Step 3) ---
+# --- Shared Utility Imports ---
 from utils.smart_scoring import get_smart_threshold
 from idpforge.utils.structure_repair import repair_chirality, fix_histidine_naming
 from idpforge.utils.structure_validation import (
     validate_structure_post_relax, check_bond_integrity, load_knot_screening,
     format_domain_spec
 )
-# ---
 
 # --- Stitch Utility Imports ---
 from utils.stitch import (
     get_completion_status, get_length_label, build_region_resids,
     get_id_to_pdb_path, get_protein_category, find_ensemble_dirs,
     format_ranges, load_pdb_structure, get_segment_atoms,
-    build_segment_map, assemble_kinematic_chain, clean_structure
+    build_segment_map, assemble_kinematic_chain, clean_structure,
+    renumber_pool
 )
-# ---
+from utils import graft_back
 
 
 # --- Energy Minimization with Amber ---
@@ -119,17 +126,11 @@ relax_cfg = {
 }
 
 def relax_with_established_method(structure, output_filepath, idr_indices=None, device="cuda:0", verbose=False):
-    """
-    Performs energy minimization using the AMBER99SB forcefield via OpenMM.
-
-    The folded domains are harmonically restrained to preserve their predicted structure,
-    while the stitched junctions and IDRs are allowed to relax, resolving local
-    steric clashes and bond length distortions.
-    """
+    """Energy-minimize the model with the AMBER99SB forcefield (folded domains restrained)."""
     pdb_name = os.path.splitext(os.path.basename(output_filepath))[0]
     output_dir = os.path.dirname(output_filepath)
 
-    # 1. Setup Config for this specific run
+    # 1. Setup config
     run_config = relax_cfg.copy()
     if idr_indices:
         run_config['exclude_residues'] = idr_indices
@@ -152,13 +153,21 @@ def relax_with_established_method(structure, output_filepath, idr_indices=None, 
 
     # 4. Run Relaxation
     try:
+        n_res = len(unrelaxed_prot.aatype)
+        if idr_indices:
+            viol_mask = np.zeros(n_res, dtype=bool)
+            idx = np.asarray(idr_indices, dtype=int)
+            viol_mask[idx[(idx >= 0) & (idx < n_res)]] = True
+        else:
+            viol_mask = None
         result = relax_protein(
             config=run_config,
             model_device=device,
             unrelaxed_protein=unrelaxed_prot,
             output_dir=output_dir,
             pdb_name=pdb_name,
-            viol_threshold=0.02
+            viol_threshold=0.02,
+            viol_mask=viol_mask
         )
 
         expected_output = os.path.join(output_dir, f"{pdb_name}_relaxed.pdb")
@@ -177,40 +186,454 @@ def relax_with_established_method(structure, output_filepath, idr_indices=None, 
         if verbose:
             print(f"       [CRASH] Relaxation failed: {e}")
         return False
-# ----------------------------------
+
+# --- Truncated-pool back-numbering ---
+def _maybe_renumber_truncated_pool(pool_path, dest_dir, label, verbose=False):
+    """Map a truncated sub-ensemble back to full-length numbering before stitching."""
+    sidecar = os.path.join(pool_path, "_truncation.json")
+    if not os.path.exists(sidecar):
+        return pool_path, None
+    try:
+        with open(sidecar) as sf:
+            offset = int(json.load(sf).get("offset", 0))
+    except Exception as e:
+        if verbose:
+            print(f"  [TRUNC] {label}: unreadable sidecar {sidecar} ({e}); using pool as-is.")
+        return pool_path, None
+    if offset == 0:
+        return pool_path, None
+    renum_dir = os.path.join(dest_dir, f"_renum_{label}")
+    new_files = renumber_pool(pool_path, renum_dir, offset, verbose=verbose)
+    if not new_files:
+        if verbose:
+            print(f"  [TRUNC] {label}: sidecar offset {offset} but no conformers to renumber.")
+        return pool_path, None
+    if verbose:
+        print(f"  [TRUNC] {label}: renumbered {len(new_files)} conformers +{offset} -> full-length.")
+    return renum_dir, new_files
+
+_HIS_RESNAMES = {'HIS', 'HID', 'HIE', 'HIP'}
+
+
+# --- Shared post-stitch relax + validation ---
+def _relax_repair_validate(raw, out_path, region_resids, gate_ctx, expected_knot_type,
+                           attempts, done, pdb_parser, verbose=False, device="cuda:0"):
+    """Relax, repair, re-relax, validate, and fold-gate one assembled full-length model."""
+    # Identify IDR vs folded residues
+    idr_idx, frozen_ids, cnt = [], [], 0
+    for r in sorted(raw[0].get_residues(), key=lambda x: x.id[1]):
+        if r.id[0] == ' ':
+            if r.id[1] in region_resids:
+                idr_idx.append(cnt)
+            else:
+                frozen_ids.append(r.id[1])
+            cnt += 1
+    if verbose:
+        print(f"       [CONFIG] Freezing residues: {format_ranges(frozen_ids)}")
+
+    # Pre-minimization: save + chirality repair
+    io_save = PDBIO()
+    io_save.set_structure(raw)
+    io_save.save(out_path)
+    repair_chirality(out_path, verbose=False)
+    repaired = load_pdb_structure(out_path, pdb_parser, verbose=verbose) or raw
+
+    # Relaxation
+    if not relax_with_established_method(repaired, out_path, idr_indices=idr_idx, device=device, verbose=verbose):
+        if verbose:
+            print(f"       [RESULT] FAILED (Relaxation Rejected)")
+        if os.path.exists(out_path):
+            os.remove(out_path)
+        return False, {"reason": "Relaxation Rejected", "_threshold": 0.0}
+
+    # Post-relax repair + re-relax
+    needs_rerelax = False
+    try:
+        chk_pdb = PDBFile(out_path)
+        broken = check_bond_integrity(chk_pdb.topology, chk_pdb.positions)
+        his_resids = {b['resid'] for b in broken
+                      if b['resname'] in _HIS_RESNAMES or b.get('resname2', '') in _HIS_RESNAMES}
+    except Exception:
+        his_resids = set()
+
+    n_chiral = repair_chirality(out_path, verbose=False)
+    if n_chiral > 0:
+        needs_rerelax = True
+        if verbose:
+            print(f"       [REPAIR] Flipped {n_chiral} D-isomer(s).")
+
+    if his_resids:
+        try:
+            n_his = fix_histidine_naming(out_path, his_resids, verbose=False)
+            if n_his and n_his > 0:
+                needs_rerelax = True
+                if verbose:
+                    print(f"       [REPAIR] Fixed {n_his} HIS naming(s).")
+        except Exception as e:
+            if verbose:
+                print(f"       [ERROR] HIS naming fix failed: {e}")
+
+    if needs_rerelax:
+        rep2 = load_pdb_structure(out_path, pdb_parser, verbose=verbose)
+        if not rep2 or not relax_with_established_method(
+                rep2, out_path, idr_indices=idr_idx, device=device, verbose=verbose):
+            if verbose:
+                print(f"       [RESULT] FAILED (Re-relax after repair)")
+            if os.path.exists(out_path):
+                os.remove(out_path)
+            return False, {"reason": "Re-relax after repair", "_threshold": 0.0}
+
+    # --- Post-minimization validation ---
+    if verbose:
+        print(f"       [POST-MIN CHECK] Validating...")
+    chk = PDBFile(out_path)
+    threshold = get_smart_threshold(
+        attempts, done, base=cfg.STITCH_BASE_CLASH_THRESHOLD, inc=cfg.STITCH_CLASH_INCREMENT)
+    idr_start_res = min(region_resids) if region_resids else None
+    idr_end_res = max(region_resids) if region_resids else None
+
+    is_valid, info = validate_structure_post_relax(
+        chk.topology, chk.positions, pdb_path=out_path,
+        strict_clash_threshold=threshold, idr_start=idr_start_res, idr_end=idr_end_res,
+        verbose=False, full_report=True, expected_knot_type=expected_knot_type)
+    info["_threshold"] = threshold
+
+    if verbose:
+        chiral_str = "PASS" if info.get("chirality_pass", True) else "FAIL"
+        bonds_str = "PASS" if info.get("bonds_pass", True) else f"FAIL ({info.get('num_broken_bonds', 0)} broken)"
+        clash_str = "PASS" if info.get("clash_pass", True) else "FAIL"
+        if expected_knot_type is not None:
+            detected = info.get("detected_knot_type")
+            disp = info.get("expected_knot_display") or format_domain_spec(expected_knot_type)
+            if info.get("knot_pass", True):
+                knot_str = f"PASS (native {disp})"
+            else:
+                knot_str = f"FAIL (expected {disp}, got {detected}) [{info.get('knot_fail_reason', '')}]"
+        else:
+            knot_str = "PASS" if info.get("knot_pass", True) else f"FAIL ({info.get('knot_type')})"
+        print(f"         - Chirality: {chiral_str}")
+        print(f"         - Bonds:     {bonds_str}")
+        print(f"         - Clashes:   {info.get('num_clashes', '?')} (Score: {info.get('clash_score', 0):.2f} | Limit: {threshold:.1f}) -> {clash_str}")
+        print(f"         - Topology:  {knot_str}")
+
+    # --- Folded-domain curvature gate ---
+    if is_valid and gate_ctx is not None:
+        if cnt != gate_ctx["n_res"]:
+            is_valid = False
+            info["reason"] = info.get("reason", "") + f" | fold-gate residue count {cnt}!={gate_ctx['n_res']}"
+            if verbose:
+                print(f"         - Fold curvature: FAIL (residue count {cnt}!={gate_ctx['n_res']})")
+        else:
+            model_ca = _ca_from_pdb_file(out_path, gate_ctx["n_res"])
+            gate_pass, gate_lines, gate_reason = _check_fold_curvature(
+                model_ca, gate_ctx["ref_ca"], gate_ctx["folded_mask"],
+                gate_ctx["curv_ratio"], window=gate_ctx["curv_window"])
+            if not gate_pass:
+                is_valid = False
+                info["reason"] = info.get("reason", "") + " | " + gate_reason
+            if verbose:
+                detail = f"  ({gate_lines[0]})" if gate_lines else ""
+                print(f"         - Fold curvature: {'PASS' if gate_pass else 'FAIL'}{detail}")
+
+    if not is_valid and os.path.exists(out_path):
+        os.remove(out_path)
+    return is_valid, info
+
+
+# --- Truncated-pool graft reconstruction ---
+def _load_graft_spec(pool_dir):
+    """Read a `_truncation.json` graft spec, or None if it is not a graft pool."""
+    sc = os.path.join(pool_dir, "_truncation.json")
+    if not os.path.exists(sc):
+        return None
+    try:
+        with open(sc) as f:
+            d = json.load(f)
+    except Exception:
+        return None
+    if "idr_ranges" not in d:
+        return None
+    if "fold_ranges" in d:
+        franges = [tuple(x) for x in d["fold_ranges"]]
+    elif "fold_range" in d:
+        franges = [tuple(d["fold_range"])]
+    else:
+        return None
+    if not franges:
+        return None
+    return {"offset": int(d.get("offset", 0)),
+            "idr_ranges": [tuple(x) for x in d["idr_ranges"]],
+            "fold_ranges": franges,
+            "fold_range": (min(lo for lo, _ in franges), max(hi for _, hi in franges))}
+
+
+def _build_fold_gate(static_path, model_resseqs, idr_ranges, curv_ratio, curv_window):
+    """Build the folded-domain curvature gate context for a reconstruction's residues."""
+    if curv_ratio <= 0:
+        return None
+    ca = graft_back._ca_by_resseq(graft_back.parse_pdb_atoms(static_path), set(model_resseqs))
+    ref = np.zeros((len(model_resseqs), 3))
+    mask = np.zeros(len(model_resseqs), dtype=bool)
+    for k, rs in enumerate(model_resseqs):
+        if rs in ca:
+            ref[k] = ca[rs]
+        mask[k] = not any(lo <= rs <= hi for (lo, hi) in idr_ranges)
+    return {"ref_ca": ref, "folded_mask": mask, "n_res": len(model_resseqs),
+            "curv_ratio": curv_ratio, "curv_window": curv_window}
+
+
+def reconstruct_truncated_pool(protein_id, pool_dir, spec, static_path, num_conformers,
+                               work_dir, final_dest_dir, knot_screening=None, verbose=False,
+                               device="cuda:0"):
+    """Finalize a size-capped single-IDR pool into a validated full-length chimera ensemble."""
+    pdb_parser = PDBParser(QUIET=True)
+    static_atoms = graft_back.parse_pdb_atoms(static_path)
+    flo, fhi = spec["fold_range"]
+    idr_ranges, offset = spec["idr_ranges"], spec["offset"]
+
+    region_resids = set()
+    for lo, hi in idr_ranges:
+        region_resids.update(range(lo, hi + 1))
+    static_fold_present = {a["resseq"] for a in static_atoms if flo <= a["resseq"] <= fhi}
+    model_resseqs = sorted(region_resids | static_fold_present)
+
+    curv_ratio = getattr(cfg, 'STITCH_FOLD_CURV_RATIO', 0.0) or 0.0
+    curv_window = int(getattr(cfg, 'STITCH_FOLD_CURV_WINDOW', 15))
+    gate_ctx = _build_fold_gate(static_path, model_resseqs, idr_ranges, curv_ratio, curv_window)
+    expected_knot_type = knot_screening.get(protein_id) if knot_screening else None
+
+    os.makedirs(work_dir, exist_ok=True)
+    # Clear stale accepted conformers
+    for _stale in glob.glob(os.path.join(work_dir, "minimized_conformer_*.pdb")):
+        os.remove(_stale)
+
+    def _cidx(p):
+        m = re.search(r'(\d+)_validated', os.path.basename(p))
+        return (0, int(m.group(1))) if m else (1, os.path.basename(p))
+    conformers = sorted(glob.glob(os.path.join(pool_dir, "*_validated.pdb")), key=_cidx)
+
+    if verbose:
+        print(f"  [Reconstruct] {protein_id}: {len(conformers)} truncated conformers -> graft "
+              f"(fold {flo}-{fhi}, IDR {idr_ranges}, offset {offset}) + relax + validate.")
+
+    import random
+    rng = random.Random(getattr(cfg, 'STITCH_PAIR_SEED', 0))
+    done, attempts = 0, 0
+
+    def _attempt(conf):
+        """Graft one truncated conformer's fold back, relax, and validate."""
+        nonlocal done, attempts
+        attempts += 1
+        grafted = os.path.join(work_dir, f"_grafted_{attempts}.pdb")
+        rep = graft_back.graft_conformer_multi(
+            conf, static_atoms, idr_ranges, spec["fold_ranges"], offset, grafted)
+        if rep is None:
+            if verbose:
+                print(f"     [Attempt {attempts}] graft failed (insufficient fold overlap); skipping.")
+            if os.path.exists(grafted):
+                os.remove(grafted)
+            return
+        raw = load_pdb_structure(grafted, pdb_parser, verbose=verbose)
+        if os.path.exists(grafted):
+            os.remove(grafted)
+        if not raw:
+            return
+        out_path = os.path.join(work_dir, f"minimized_conformer_{done + 1}.pdb")
+        if verbose:
+            print(f"\n{'-'*60}\n     [Attempt {attempts}] Grafted -> full length "
+                  f"(junction {rep['junction_gap']}, seam {rep['seam_gap']})")
+        try:
+            is_valid, info = _relax_repair_validate(
+                raw, out_path, region_resids, gate_ctx, expected_knot_type,
+                attempts, done, pdb_parser, verbose=verbose, device=device)
+        except Exception as e:
+            if verbose:
+                print(f"       [ERROR] Validation crashed: {e}")
+            if os.path.exists(out_path):
+                os.remove(out_path)
+            return
+        if is_valid:
+            done += 1
+            finalize_model_pdb(out_path, done)
+            if verbose:
+                print(f"       [RESULT] SUCCESS! (Total: {done}/{num_conformers})")
+        elif verbose:
+            print(f"       [RESULT] FAILED ({info.get('reason', 'Unknown')}) "
+                  f"[Thresh: {info.get('_threshold', 0):.2f}]")
+
+    # Phase 1: single pass
+    for conf in conformers:
+        if done >= num_conformers:
+            break
+        _attempt(conf)
+
+    # Phase 2: top-up
+    max_attempts = getattr(cfg, 'STITCH_MAX_ATTEMPTS', num_conformers * 5)
+    if done < num_conformers and conformers:
+        if verbose:
+            print(f"    [Top-up] single pass gave {done}/{num_conformers}; filling the rest by "
+                  f"random sampling WITH replacement (cap {max_attempts} attempts).", flush=True)
+        while done < num_conformers and attempts < max_attempts:
+            _attempt(rng.choice(conformers))
+        if verbose and done < num_conformers:
+            print(f"    [Note] reached {done}/{num_conformers} after {attempts} attempts "
+                  f"(hit the {max_attempts}-attempt cap).", flush=True)
+
+    accepted = sorted(glob.glob(os.path.join(work_dir, "minimized_conformer_*.pdb")),
+                      key=lambda p: int(re.search(r'(\d+)\.pdb', p).group(1)))
+    if not accepted:
+        if verbose:
+            print(f"    [!] No conformers survived reconstruction for {protein_id}; no ensemble written.")
+        return "Failed", 0
+    os.makedirs(final_dest_dir, exist_ok=True)
+    _clear_stale_ensembles(final_dest_dir, protein_id)
+    ensemble_path = os.path.join(final_dest_dir, f"{protein_id}_ensemble_n{len(accepted)}.pdb")
+    with open(ensemble_path, 'w') as f:
+        f.writelines(mkensemble(accepted))
+    if verbose:
+        print(f"    -> Reconstructed + validated ensemble: {ensemble_path} ({len(accepted)} models)")
+    return get_completion_status(len(accepted), num_conformers), len(accepted)
+
+
+def reconstruct_combined_chimera(protein_id, tail_specs, static_path, fold_range, num_conformers,
+                                 work_dir, final_dest_dir, knot_screening=None, verbose=False,
+                                 device="cuda:0", max_attempts=None):
+    """Assemble and validate a multi-tail full-length chimera ensemble."""
+    import random
+    pdb_parser = PDBParser(QUIET=True)
+    static_atoms = graft_back.parse_pdb_atoms(static_path)
+    flo, fhi = fold_range
+
+    idr_ranges = [tuple(ts["idr_range"]) for ts in tail_specs]
+    region_resids = set()
+    for lo, hi in idr_ranges:
+        region_resids.update(range(lo, hi + 1))
+    static_fold_present = {a["resseq"] for a in static_atoms if flo <= a["resseq"] <= fhi}
+    model_resseqs = sorted(region_resids | static_fold_present)
+
+    curv_ratio = getattr(cfg, 'STITCH_FOLD_CURV_RATIO', 0.0) or 0.0
+    curv_window = int(getattr(cfg, 'STITCH_FOLD_CURV_WINDOW', 15))
+    gate_ctx = _build_fold_gate(static_path, model_resseqs, idr_ranges, curv_ratio, curv_window)
+    expected_knot_type = knot_screening.get(protein_id) if knot_screening else None
+
+    def _cidx(p):
+        m = re.search(r'(\d+)_validated', os.path.basename(p))
+        return int(m.group(1)) if m else (1 << 30)
+    tail_files = [sorted(glob.glob(os.path.join(ts["pool_dir"], "*_validated.pdb")), key=_cidx)
+                  for ts in tail_specs]
+    if any(len(fs) == 0 for fs in tail_files):
+        return "Failed", 0
+
+    os.makedirs(work_dir, exist_ok=True)
+    for _stale in glob.glob(os.path.join(work_dir, "stitched_conformer_*.pdb")):
+        os.remove(_stale)
+
+    rng = random.Random(getattr(cfg, 'STITCH_PAIR_SEED', 0))
+    _pools = []
+    for fs in tail_files:
+        fs = list(fs)
+        rng.shuffle(fs)
+        _pools.append(fs)
+    pairings = list(zip(*_pools))
+
+    if verbose:
+        print(f"  [Combine] {protein_id}: {[len(fs) for fs in tail_files]} tail conformers -> "
+              f"{len(pairings)} unique pairings (no reuse); graft both IDRs {idr_ranges} onto "
+              f"fold {flo}-{fhi} + relax + validate.")
+
+    done, attempts = 0, 0
+
+    def _attempt(pairing):
+        """Graft, relax, and validate one per-tail conformer pairing."""
+        nonlocal done, attempts
+        attempts += 1
+        idr_specs = [dict(conf_path=pairing[j],
+                          idr_range=tail_specs[j]["idr_range"], offset=tail_specs[j]["offset"])
+                     for j in range(len(tail_specs))]
+        grafted = os.path.join(work_dir, f"_grafted_{attempts}.pdb")
+        reps = graft_back.graft_idrs_onto_fold(static_atoms, fold_range, idr_specs, grafted)
+        if any(r.get("rms") is None for r in reps):
+            if verbose:
+                bad = [r["idr_range"] for r in reps if r.get("rms") is None]
+                print(f"     [Attempt {attempts}] tail(s) {bad} failed stub alignment; skipping.")
+            if os.path.exists(grafted):
+                os.remove(grafted)
+            return
+        raw = load_pdb_structure(grafted, pdb_parser, verbose=verbose)
+        if os.path.exists(grafted):
+            os.remove(grafted)
+        if not raw:
+            return
+        out_path = os.path.join(work_dir, f"stitched_conformer_{done + 1}.pdb")
+        if verbose:
+            print(f"\n{'-'*60}\n     [Attempt {attempts}] Combined chimera -> full length")
+        try:
+            is_valid, info = _relax_repair_validate(
+                raw, out_path, region_resids, gate_ctx, expected_knot_type,
+                attempts, done, pdb_parser, verbose=verbose, device=device)
+        except Exception as e:
+            if verbose:
+                print(f"       [ERROR] Validation crashed: {e}")
+            if os.path.exists(out_path):
+                os.remove(out_path)
+            return
+        if is_valid:
+            done += 1
+            finalize_model_pdb(out_path, done)
+            if verbose:
+                print(f"       [RESULT] SUCCESS! (Total: {done}/{num_conformers})")
+        elif verbose:
+            print(f"       [RESULT] FAILED ({info.get('reason', 'Unknown')}) "
+                  f"[Thresh: {info.get('_threshold', 0):.2f}]")
+
+    # Phase 1: single pass
+    for pairing in pairings:
+        if done >= num_conformers:
+            break
+        _attempt(pairing)
+
+    # Phase 2: top-up
+    max_attempts = getattr(cfg, 'STITCH_MAX_ATTEMPTS', num_conformers * 5)
+    if done < num_conformers:
+        if verbose:
+            print(f"    [Top-up] no-reuse pass gave {done}/{num_conformers}; filling the rest by "
+                  f"random sampling WITH replacement (cap {max_attempts} attempts).", flush=True)
+        while done < num_conformers and attempts < max_attempts:
+            _attempt(tuple(rng.choice(tail_files[j]) for j in range(len(tail_specs))))
+        if verbose and done < num_conformers:
+            print(f"    [Note] reached {done}/{num_conformers} after {attempts} attempts "
+                  f"(hit the {max_attempts}-attempt cap).", flush=True)
+
+    accepted = sorted(glob.glob(os.path.join(work_dir, "stitched_conformer_*.pdb")),
+                      key=lambda p: int(re.search(r'(\d+)\.pdb', p).group(1)))
+    if not accepted:
+        if verbose:
+            print(f"    [!] No combined chimeras survived ({attempts} attempts); no ensemble written.")
+        return "Failed", 0
+    os.makedirs(final_dest_dir, exist_ok=True)
+    _clear_stale_ensembles(final_dest_dir, protein_id)
+    ensemble_path = os.path.join(final_dest_dir, f"{protein_id}_ensemble_n{len(accepted)}.pdb")
+    with open(ensemble_path, 'w') as f:
+        f.writelines(mkensemble(accepted))
+    if verbose:
+        print(f"    -> Combined + validated ensemble: {ensemble_path} "
+              f"({len(accepted)} models, {attempts} attempts)")
+    return get_completion_status(len(accepted), num_conformers), len(accepted)
 
 # --- Main Processing Function ---
 def process_protein(protein_id, labeled_db, id_to_pdb_path, conformer_root_dir, output_dir, final_output_root, num_conformers, length_ref=None, verbose=False, knot_screening=None, **kwargs):
-    """
-    Orchestrates the assembly pipeline for a single protein.
-
-    Case 1 (Single IDR / IDP):
-        Collects all validated conformers from Step 3 and writes them into a
-        single multi-model PDB ensemble file.
-
-    Case 2 (Multiple IDRs):
-        Runs a Monte Carlo stitching loop:
-        1. Stitch: Assembles a new conformation via kinematic chain assembly.
-        2. Relax: AMBER energy minimization with folded-domain restraints.
-        3. Repair: Chirality + HIS naming repair, re-relax if needed.
-        4. Validate: Unified validation (chirality, bonds, clashes, topology).
-        5. Combine: Writes all valid conformers into one multi-model PDB.
-
-    Returns:
-        tuple: (Category, Status, Success_Count) for global reporting.
-    """
+    """Orchestrate the stitching/assembly pipeline for a single protein."""
 
     labeled_idrs = labeled_db[protein_id].get('labeled_idrs', [])
 
-    # Identify specific IDR segments (excluding the global IDP label)
+    # Identify IDR segments
     ldr_infos = [i for i in labeled_idrs if i.get('type') != 'IDP']
     category = get_protein_category(labeled_idrs)
 
-    # Skip if no disordered regions found
     if not ldr_infos and category != "Category_0_IDP":
         return category, "Skipped", 0
 
-    # Determine length label from pre-loaded reference (avoids parsing static PDB)
+    # Determine length label
     num_residues = length_ref.get(protein_id, 0) if length_ref else 0
     length_label = get_length_label(num_residues)
 
@@ -219,17 +642,13 @@ def process_protein(protein_id, labeled_db, id_to_pdb_path, conformer_root_dir, 
     final_dest_dir = os.path.join(final_output_root, category, length_label, protein_id)
     work_dir = os.path.join(output_dir, category, protein_id, f"{mode}_ensemble")
 
-    # =========================================================================
-    # FAST-PASS LOGIC: Collect all Step 3 conformers into a single ensemble PDB
-    # =========================================================================
+    # Fast-pass: collect Step 3 conformers into one ensemble
     if category == "Category_0_IDP" or len(ldr_infos) <= 1:
-        # Skip if ensemble already exists in final destination
-        if os.path.exists(final_dest_dir):
-            existing = glob.glob(os.path.join(final_dest_dir, f"{protein_id}_ensemble_*.pdb"))
-            if existing:
-                if verbose:
-                    print(f"  [Resume] Ensemble PDB already exists. Skipping.")
-                return category, "Complete", num_conformers
+        _have = _max_ensemble_n(final_dest_dir, protein_id)
+        if _have >= num_conformers:
+            if verbose:
+                print(f"  [Resume] Ensemble already at n{_have} (>= {num_conformers}). Skipping.")
+            return category, "Complete", _have
 
         if verbose:
             print(f"  [Fast-Pass] Single-region detected. Combining into ensemble PDB...")
@@ -247,18 +666,43 @@ def process_protein(protein_id, labeled_db, id_to_pdb_path, conformer_root_dir, 
             start, end = idr_info['range']
             range_tag = f"idr_{start}-{end}"
             src_folder = os.path.join(conformer_root_dir, protein_id, range_tag)
-            source_files = glob.glob(os.path.join(src_folder, "*_validated.pdb"))
+            graft_spec = _load_graft_spec(src_folder)
+            if graft_spec is not None:
+                gs_static = id_to_pdb_path.get(protein_id)
+                if gs_static:
+                    _have = _max_ensemble_n(final_dest_dir, protein_id)
+                    if _have >= num_conformers:
+                        if verbose:
+                            print(f"  [Resume] Ensemble already at n{_have} (>= {num_conformers}). Skipping.")
+                        return category, "Complete", _have
+                    gs_status, gs_n = reconstruct_truncated_pool(
+                        protein_id, src_folder, graft_spec, gs_static, num_conformers,
+                        work_dir, final_dest_dir, knot_screening=knot_screening, verbose=verbose)
+                    return category, gs_status, gs_n
+                elif verbose:
+                    print(f"    [!] Truncated pool but no static PDB for {protein_id}; bundling as-is.")
+            fp_path, fp_files = _maybe_renumber_truncated_pool(
+                src_folder, work_dir, idr_info.get('label', 'D1'), verbose=verbose)
+            if fp_files is not None:
+                source_files = fp_files
+            else:
+                source_files = glob.glob(os.path.join(src_folder, "*_validated.pdb"))
 
         if not source_files:
             if verbose:
                 print(f"    [!] Error: No validated conformers found in {src_folder}")
             return category, "Failed", 0
 
-        source_files = sorted(source_files)[:num_conformers]
+        # Order by conformer index
+        def _conf_idx(p):
+            m = re.search(r'(\d+)_validated', os.path.basename(p))
+            return (0, int(m.group(1))) if m else (1, os.path.basename(p))
+        source_files = sorted(source_files, key=_conf_idx)[:num_conformers]
 
         os.makedirs(final_dest_dir, exist_ok=True)
+        _clear_stale_ensembles(final_dest_dir, protein_id)
 
-        # Build multi-model ensemble PDB using pdb-tools
+        # Build ensemble PDB
         n_models = len(source_files)
         ensemble_filename = f"{protein_id}_ensemble_n{n_models}.pdb"
         ensemble_path = os.path.join(final_dest_dir, ensemble_filename)
@@ -269,8 +713,7 @@ def process_protein(protein_id, labeled_db, id_to_pdb_path, conformer_root_dir, 
         if verbose:
             print(f"    -> Ensemble PDB saved: {ensemble_path} ({n_models} models)")
         return category, "Complete", n_models
-    # =========================================================================
-    # --- CASE 2: Load static PDB (only needed for stitching) ---
+    # --- Case 2: load static PDB ---
     static_path = id_to_pdb_path.get(protein_id)
     if not static_path:
         if verbose:
@@ -285,11 +728,11 @@ def process_protein(protein_id, labeled_db, id_to_pdb_path, conformer_root_dir, 
     # 1. Check Final Destination for existing ensemble
     existing_final = 0
     if os.path.exists(final_dest_dir):
-        existing_ensemble = glob.glob(os.path.join(final_dest_dir, f"{protein_id}_ensemble_*.pdb"))
-        if existing_ensemble:
+        _have = _max_ensemble_n(final_dest_dir, protein_id)
+        if _have >= num_conformers:
             if verbose:
-                print(f"  [Resume] Ensemble PDB already exists. Skipping.")
-            return category, "Complete", num_conformers
+                print(f"  [Resume] Ensemble already at n{_have} (>= {num_conformers}). Skipping.")
+            return category, "Complete", _have
         existing_final = len(glob.glob(os.path.join(final_dest_dir, f"{mode}_conformer_*.pdb")))
 
     # 2. Check Temp Work Dir
@@ -304,7 +747,6 @@ def process_protein(protein_id, labeled_db, id_to_pdb_path, conformer_root_dir, 
 
     # 3. Determine 'Done' count
     done = max(existing_final, max_temp_idx)
-    # ----------------------------
 
     # Setup Source
     ensemble_dirs = find_ensemble_dirs(protein_id, conformer_root_dir, ldr_infos, verbose=verbose)
@@ -313,10 +755,62 @@ def process_protein(protein_id, labeled_db, id_to_pdb_path, conformer_root_dir, 
 
     os.makedirs(work_dir, exist_ok=True)
 
+    # --- Truncated multi-tail graft ---
+    if ensemble_dirs and len(ldr_infos) >= 2:
+        _pool_specs, _ok = [], True
+        for _idr in ldr_infos:
+            _lo, _hi = _idr['range']
+            _match = None
+            for _entry in ensemble_dirs.values():
+                _s = _load_graft_spec(_entry['path'])
+                if _s and any(tuple(r) == (_lo, _hi) for r in _s['idr_ranges']):
+                    _match = (_entry['path'], _s)
+                    break
+            if _match is None:
+                _ok = False
+                break
+            _pool_specs.append((_match[0], _match[1], (_lo, _hi)))
+        if _ok:
+            _fold_range = (max(s['fold_range'][0] for _, s, _ in _pool_specs),
+                           min(s['fold_range'][1] for _, s, _ in _pool_specs))
+            if _fold_range[0] <= _fold_range[1]:
+                if verbose:
+                    print(f"  [Graft] {len(_pool_specs)} truncated tails -> shared fold "
+                          f"{_fold_range[0]}-{_fold_range[1]} (reconstruct_combined_chimera).")
+                _tail_specs = [dict(pool_dir=_pd, idr_range=_ir, offset=_s['offset'])
+                               for _pd, _s, _ir in _pool_specs]
+                _st, _n = reconstruct_combined_chimera(
+                    protein_id, _tail_specs, static_path, _fold_range, num_conformers,
+                    work_dir, final_dest_dir, knot_screening=knot_screening, verbose=verbose,
+                    device=kwargs.get('device', 'cuda:0'))
+                return category, _st, _n
+
+    # Map truncated sub-ensembles back to full-length numbering
+    if ensemble_dirs:
+        for _label, _entry in ensemble_dirs.items():
+            _new_path, _new_files = _maybe_renumber_truncated_pool(
+                _entry['path'], work_dir, _label, verbose=verbose)
+            if _new_files is not None:
+                _entry['path'] = _new_path
+                _entry['files'] = _new_files
+
     region_resids = build_region_resids(ldr_infos)
     _HIS_RESNAMES = {'HIS', 'HID', 'HIE', 'HIP'}
 
-    # Look up expected knot type from pre-computed screening
+    # --- Folded-domain curvature gate setup ---
+    curv_ratio = kwargs.get('fold_curv_ratio', getattr(cfg, 'STITCH_FOLD_CURV_RATIO', 0.0)) or 0.0
+    curv_window = int(kwargs.get('fold_curv_window', getattr(cfg, 'STITCH_FOLD_CURV_WINDOW', 15)))
+    gate_ref_ca = gate_folded_mask = None
+    gate_n_res = 0
+    if curv_ratio > 0:
+        gate_n_res = len([r for r in static_struct[0].get_list()[0] if r.id[0] == ' '])
+        gate_ref_ca = _ca_from_pdb_file(static_path, gate_n_res)
+        gate_folded_mask = np.ones(gate_n_res, dtype=bool)
+        for _idr in ldr_infos:
+            _lo, _hi = _idr['range']
+            gate_folded_mask[_lo - 1:_hi] = False
+
+    # Expected knot type
     expected_knot_type = None
     if knot_screening:
         expected_knot_type = knot_screening.get(protein_id)
@@ -355,147 +849,32 @@ def process_protein(protein_id, labeled_db, id_to_pdb_path, conformer_root_dir, 
 
         if not raw: continue
 
-        # Identify Frozen/IDR Residues
-        idr_idx, frozen_ids, cnt = [], [], 0
-
-        all_residues_in_struct = list(raw[0].get_residues())
-        all_residues_in_struct.sort(key=lambda x: x.id[1])
-
-        for r in all_residues_in_struct:
-            if r.id[0] == ' ':
-                if r.id[1] in region_resids:
-                    idr_idx.append(cnt)
-                else:
-                    frozen_ids.append(r.id[1])
-                cnt += 1
-
-        if verbose:
-            print(f"       [CONFIG] Freezing residues: {format_ranges(frozen_ids)}")
-
-        # --- PRE-MINIMIZATION: Save and repair chirality ---
-        io_save = PDBIO()
-        io_save.set_structure(raw)
-        io_save.save(out_path)
-        repair_chirality(out_path, verbose=False)
-
-        repaired = load_pdb_structure(out_path, pdb_parser, verbose=verbose) or raw
-
-        # --- RELAXATION ---
-        if not relax_with_established_method(repaired, out_path, idr_indices=idr_idx, verbose=verbose):
-            if verbose:
-                print(f"       [RESULT] FAILED (Relaxation Rejected)")
-            if os.path.exists(out_path): os.remove(out_path)
-            continue
-
-        # --- POST-RELAX REPAIR (matching Step 3 pattern) ---
-        needs_rerelax = False
-
-        # Bond integrity check for broken HIS residues
+        # --- Shared relax + validation ---
+        gate_ctx = ({"ref_ca": gate_ref_ca, "folded_mask": gate_folded_mask,
+                     "n_res": gate_n_res, "curv_ratio": curv_ratio, "curv_window": curv_window}
+                    if (curv_ratio > 0 and gate_ref_ca is not None) else None)
         try:
-            chk_pdb = PDBFile(out_path)
-            broken = check_bond_integrity(chk_pdb.topology, chk_pdb.positions)
-            his_resids = {b['resid'] for b in broken
-                          if b['resname'] in _HIS_RESNAMES
-                          or b.get('resname2', '') in _HIS_RESNAMES}
-        except Exception:
-            his_resids = set()
-
-        # Chirality repair (post-relax)
-        n_chiral = repair_chirality(out_path, verbose=False)
-        if n_chiral > 0:
-            needs_rerelax = True
-            if verbose:
-                print(f"       [REPAIR] Flipped {n_chiral} D-isomer(s).")
-
-        # HIS naming fix
-        if his_resids:
-            try:
-                n_his = fix_histidine_naming(out_path, his_resids, verbose=False)
-                if n_his and n_his > 0:
-                    needs_rerelax = True
-                    if verbose:
-                        print(f"       [REPAIR] Fixed {n_his} HIS naming(s).")
-            except Exception as e:
-                if verbose:
-                    print(f"       [ERROR] HIS naming fix failed: {e}")
-
-        # Re-relax if repairs were applied
-        if needs_rerelax:
-            repaired_struct = load_pdb_structure(out_path, pdb_parser, verbose=verbose)
-            if not repaired_struct or not relax_with_established_method(
-                repaired_struct, out_path, idr_indices=idr_idx, verbose=verbose
-            ):
-                if verbose:
-                    print(f"       [RESULT] FAILED (Re-relax after repair)")
-                if os.path.exists(out_path): os.remove(out_path)
-                continue
-
-        # --- POST-MINIMIZATION VALIDATION (shared utils) ---
-        if verbose:
-            print(f"       [POST-MIN CHECK] Validating...")
-        try:
-            chk = PDBFile(out_path)
-
-            threshold = get_smart_threshold(
-                attempts, done,
-                base=cfg.STITCH_BASE_CLASH_THRESHOLD,
-                inc=cfg.STITCH_CLASH_INCREMENT
-            )
-
-            idr_start_res = min(region_resids) if region_resids else None
-            idr_end_res = max(region_resids) if region_resids else None
-
-            is_valid, info = validate_structure_post_relax(
-                chk.topology, chk.positions,
-                pdb_path=out_path,
-                strict_clash_threshold=threshold,
-                idr_start=idr_start_res,
-                idr_end=idr_end_res,
-                verbose=False,
-                full_report=True,
-                expected_knot_type=expected_knot_type
-            )
-
-            if verbose:
-                # Log results (matching Step 3 format)
-                chiral_str = "PASS" if info.get("chirality_pass", True) else "FAIL"
-                bonds_str = "PASS" if info.get("bonds_pass", True) else f"FAIL ({info.get('num_broken_bonds', 0)} broken)"
-                clash_str = "PASS" if info.get("clash_pass", True) else "FAIL"
-
-                if expected_knot_type is not None:
-                    detected = info.get("detected_knot_type")
-                    disp = info.get("expected_knot_display") or format_domain_spec(expected_knot_type)
-                    if info.get("knot_pass", True):
-                        knot_str = f"PASS (native {disp})"
-                    else:
-                        fail_reason = info.get("knot_fail_reason", "")
-                        knot_str = f"FAIL (expected {disp}, got {detected}) [{fail_reason}]"
-                else:
-                    knot_str = "PASS" if info.get("knot_pass", True) else f"FAIL ({info.get('knot_type')})"
-
-                print(f"         - Chirality: {chiral_str}")
-                print(f"         - Bonds:     {bonds_str}")
-                print(f"         - Clashes:   {info.get('num_clashes', '?')} (Score: {info.get('clash_score', 0):.2f} | Limit: {threshold:.1f}) -> {clash_str}")
-                print(f"         - Topology:  {knot_str}")
-
-            if is_valid:
-                done += 1
-                if verbose:
-                    print(f"       [RESULT] SUCCESS! (Total: {done}/{num_conformers})")
-            else:
-                reason = info.get('reason', 'Unknown')
-                if verbose:
-                    print(f"       [RESULT] FAILED ({reason}) [Thresh: {threshold:.2f}]")
-                if os.path.exists(out_path): os.remove(out_path)
-
+            is_valid, info = _relax_repair_validate(
+                raw, out_path, region_resids, gate_ctx, expected_knot_type,
+                attempts, done, pdb_parser, verbose=verbose)
         except Exception as e:
             if verbose:
                 print(f"       [ERROR] Validation crashed: {e}")
             if os.path.exists(out_path): os.remove(out_path)
+            continue
+
+        if is_valid:
+            done += 1
+            finalize_model_pdb(out_path, done)
+            if verbose:
+                print(f"       [RESULT] SUCCESS! (Total: {done}/{num_conformers})")
+        elif verbose:
+            print(f"       [RESULT] FAILED ({info.get('reason', 'Unknown')}) "
+                  f"[Thresh: {info.get('_threshold', 0):.2f}]")
 
     status = get_completion_status(done, num_conformers)
 
-    # --- Combine all conformers into a single multi-model PDB ---
+    # --- Combine conformers into one multi-model PDB ---
     conformer_files = sorted(
         glob.glob(os.path.join(work_dir, f"{mode}_conformer_*.pdb")),
         key=lambda p: int(re.search(r'(\d+)\.pdb$', p).group(1))
@@ -504,6 +883,7 @@ def process_protein(protein_id, labeled_db, id_to_pdb_path, conformer_root_dir, 
     if conformer_files:
         n_models = len(conformer_files)
         os.makedirs(final_dest_dir, exist_ok=True)
+        _clear_stale_ensembles(final_dest_dir, protein_id)
         ensemble_filename = f"{protein_id}_ensemble_n{n_models}.pdb"
         ensemble_path = os.path.join(final_dest_dir, ensemble_filename)
 
@@ -521,7 +901,6 @@ def process_protein(protein_id, labeled_db, id_to_pdb_path, conformer_root_dir, 
         pass
 
     return category, status, done
-# ----------------------------------
 
 # --- Main execution block ---
 if __name__ == "__main__":
@@ -529,8 +908,8 @@ if __name__ == "__main__":
         description="Step 4: Kinematic Stitching & Energy Minimization Pipeline",
         epilog="Example: python Step_4_stitch.py --id_file ids.txt --total_splits 10 --split_index 0"
     )
-    parser.add_argument("--id_file", required=True,
-                        help="Path to the input text file containing newline-separated UniProt IDs.")
+    parser.add_argument("--id_file", default=cfg.RUN_ID_FILE,
+                        help=f"Newline-separated UniProt ID list (default from config: {cfg.RUN_ID_FILE}).")
     parser.add_argument("--total_splits", type=int, default=1,
                         help="Total number of parallel jobs (default: 1).")
     parser.add_argument("--split_index", type=int, default=0,
@@ -549,12 +928,21 @@ if __name__ == "__main__":
                         help=f"Target number of ensemble conformers per protein (default: {cfg.STITCH_N_CONFORMERS}).")
     parser.add_argument("--max_attempts", type=int, default=cfg.STITCH_MAX_ATTEMPTS,
                         help=f"Maximum stitching attempts per protein (default: {cfg.STITCH_MAX_ATTEMPTS}).")
+    parser.add_argument("--fold_curv_ratio", type=float, default=cfg.STITCH_FOLD_CURV_RATIO,
+                        help=f"Folded-domain curvature gate: reject if a junction-adjacent fold window "
+                             f"straightens below this fraction of the template curvature; 0 disables "
+                             f"(default: {cfg.STITCH_FOLD_CURV_RATIO}).")
+    parser.add_argument("--fold_curv_window", type=int, default=cfg.STITCH_FOLD_CURV_WINDOW,
+                        help=f"Folded residues into the fold from each junction to average for the "
+                             f"curvature gate (default: {cfg.STITCH_FOLD_CURV_WINDOW}).")
     parser.add_argument("--verbose", action="store_true", default=cfg.VERBOSE,
                         help="Enable detailed per-protein logging.")
     args = parser.parse_args()
 
-    # Override config with CLI args so helper functions pick them up
+    # Override config with CLI args
     cfg.STITCH_MAX_ATTEMPTS = args.max_attempts
+    cfg.STITCH_FOLD_CURV_RATIO = args.fold_curv_ratio
+    cfg.STITCH_FOLD_CURV_WINDOW = args.fold_curv_window
 
     batch_label = os.path.splitext(os.path.basename(args.id_file))[0]
 
@@ -593,7 +981,7 @@ if __name__ == "__main__":
         print(f"[!] CRITICAL ERROR: Failed to load external resources: {e}")
         sys.exit(1)
 
-    # Load pre-computed knot screening for topology matching
+    # Load knot screening
     knot_screening_path = getattr(cfg, 'KNOT_SCREENING_PATH',
         os.path.join(cfg.INPUT_DATA_DIR, "knot_screening.json"))
     knot_screening = load_knot_screening(knot_screening_path)
@@ -634,7 +1022,9 @@ if __name__ == "__main__":
         num_conformers=args.n_conformers,
         length_ref=length_ref,
         verbose=verbose,
-        knot_screening=knot_screening
+        knot_screening=knot_screening,
+        fold_curv_ratio=args.fold_curv_ratio,
+        fold_curv_window=args.fold_curv_window
     )
 
     # Filter to valid IDs upfront
@@ -651,26 +1041,39 @@ if __name__ == "__main__":
         # --- PARALLEL EXECUTION ---
         from concurrent.futures import ProcessPoolExecutor, as_completed
         print(f"    Workers:     {args.workers}")
+        perprotein_dir = os.path.join("logs", "Step4", "perprotein", f"split_{args.split_index}")
+        os.makedirs(perprotein_dir, exist_ok=True)
+        print(f"    Per-protein LIVE logs: {perprotein_dir}/<ID>.log   (tail -f to watch one)")
+        print(f"    {'#':>4s}  {'protein':14s} {'status':10s} {'models':>6s}   log")
 
         with ProcessPoolExecutor(max_workers=args.workers) as executor:
             futures = {
-                executor.submit(process_protein, protein_id=pid, **common_kwargs): pid
+                executor.submit(_process_protein_to_file, protein_id=pid,
+                                _log_dir=perprotein_dir, **common_kwargs): pid
                 for pid in valid_ids
             }
 
-            completed = as_completed(futures)
-
-            for fut in completed:
+            done_n = 0
+            for fut in as_completed(futures):
                 protein_id = futures[fut]
+                done_n += 1
+                tag = f"[{done_n}/{len(valid_ids)}]"
                 try:
-                    cat_result, completion_status, num_success = fut.result()
-                    stats['processed'] += 1
-                    status_counts[completion_status] += 1
-                    if completion_status == "Failed": stats['failed'] += 1
+                    result, log_path, err = fut.result()
                 except Exception as e:
-                    if verbose:
-                        print(f"    [!] EXCEPTION CRASH on {protein_id}: {e}")
+                    print(f"    {tag:>7s}  {protein_id:14s} {'WORKER-ERR':10s} {'':>6s}   {e}", flush=True)
                     stats['crashed'] += 1
+                    continue
+                logname = os.path.basename(log_path)
+                if err is not None:
+                    print(f"    {tag:>7s}  {protein_id:14s} {'CRASH':10s} {'':>6s}   {logname}", flush=True)
+                    stats['crashed'] += 1
+                    continue
+                cat_result, completion_status, num_success = result
+                stats['processed'] += 1
+                status_counts[completion_status] += 1
+                if completion_status == "Failed": stats['failed'] += 1
+                print(f"    {tag:>7s}  {protein_id:14s} {completion_status:10s} {num_success:>6d}   {logname}", flush=True)
     else:
         # --- SEQUENTIAL EXECUTION ---
         iterator = valid_ids
