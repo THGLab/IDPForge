@@ -55,17 +55,25 @@ def get_cuda_bare_metal_version(cuda_dir):
 compute_capabilities = set([
     (6, 1),  # Pascal
     (7, 0),  # Volta
-    (8, 0),  # Ampere (A40/A100)
-    (9, 0),  # Hopper/Ada
+    (7, 5),  # Turing
+    (8, 0),  # Ampere/Ada
+    (9, 0),  # Hopper
     (12, 0), # Blackwell
 ])
 
 cc_flag = []
-for major, minor in list(compute_capabilities):
+for major, minor in sorted(compute_capabilities):
     cc_flag.extend([
         '-gencode',
         f'arch=compute_{major}{minor},code=sm_{major}{minor}',
     ])
+
+# PTX fallback for future architectures
+ptx_major, ptx_minor = max(compute_capabilities)
+cc_flag.extend([
+    '-gencode',
+    f'arch=compute_{ptx_major}{ptx_minor},code=compute_{ptx_major}{ptx_minor}',
+])
 
 extra_cuda_flags += cc_flag
 
